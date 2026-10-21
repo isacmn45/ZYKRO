@@ -1,0 +1,22 @@
+[package]
+name = "zykro"
+version = "0.1.0"
+edition = "2021"
+description = "ZYKRO: emulador propio sobre el Android de SwagPlayer (redroid + swag-rust-server)"
+
+[dependencies]
+eframe = "0.36"
+egui-phosphor = "0.14.0"
+libc = "0.2.191"
+memmap2 = "0.9.11"
+nix = { version = "0.31.3", features = ["socket", "poll", "uio"] }
+png = "0.18.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = "thin"
