@@ -12,6 +12,7 @@ mod editor;
 mod mapeo;
 mod menu;
 mod raton;
+mod recientes;
 mod rueda;
 mod video;
 
@@ -85,6 +86,8 @@ struct Zykro {
     editor: editor::Editor,
     /// Menú rápido del botón de controles (sensibilidad), como el de BlueStacks.
     menu: menu::Menu,
+    /// Selector de apps abiertas (el botón Recientes), propio porque Android ya no tiene vista de recientes.
+    recientes: recientes::Recientes,
     /// Se está mostrando la confirmación para cerrar ZYKRO.
     confirmar_cierre: bool,
     /// El usuario ya confirmó: el próximo pedido de cierre se deja pasar.
@@ -133,6 +136,7 @@ impl Zykro {
             raton_listo,
             editor: editor::Editor::new(),
             menu: menu::Menu::default(),
+            recientes: recientes::Recientes::default(),
             confirmar_cierre: false,
             cierre_confirmado: false,
             mapeo_activo: false,
@@ -219,6 +223,10 @@ impl Zykro {
         if self.revision_app.elapsed() > Duration::from_secs(1) {
             if let Some(app) = android::app_activa() {
                 self.motor().cambiar_app(&app, control.as_ref(), w, h);
+                // Miniatura de la app al frente para el selector de apps abiertas.
+                if let Some(cuadro) = &self.cuadro {
+                    self.recientes.guardar_miniatura(&app, cuadro);
+                }
             }
             self.revision_app = Instant::now();
             ctx.request_repaint_after(Duration::from_secs(1));
@@ -233,6 +241,7 @@ impl Zykro {
             && !self.ajustes.abierto
             && !self.menu.abierto()
             && !self.confirmar_cierre
+            && !self.recientes.abierto()
             && enfocada;
         if self.mapeo_activo && !activo {
             if let Some(c) = &control {
@@ -481,8 +490,14 @@ impl Zykro {
                 ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
                     ui.add_space(8.0);
                     let t = Vec2::new(ANCHO_LATERAL, 34.0);
-                    if boton_nav(ui, Nav::Recientes, t).clicked() {
-                        self.pulsar(187);
+                    if boton_nav(ui, Nav::Recientes, t).clicked() && self.control().is_some() {
+                        // Antes de abrir, la miniatura más nueva de la app que está al frente.
+                        if !self.recientes.abierto() {
+                            if let (Some(app), Some(cuadro)) = (android::app_activa(), &self.cuadro) {
+                                self.recientes.guardar_miniatura(&app, cuadro);
+                            }
+                        }
+                        self.recientes.alternar(ctx);
                     }
                     if boton_nav(ui, Nav::Inicio, t).clicked() {
                         self.pulsar(3);
@@ -549,9 +564,10 @@ impl Zykro {
 
             if self.editor.abierto {
                 self.teclas_editor(ctx);
-            } else if !en_borde && !self.ajustes.abierto && !self.menu.abierto() && !self.confirmar_cierre {
+            } else if !en_borde && !self.ajustes.abierto && !self.menu.abierto() && !self.confirmar_cierre && !self.recientes.abierto() {
                 self.entrada(ctx, rect, ancho, alto);
             }
+            self.recientes.mostrar(ctx, area);
             // Fuera de `entrada` también: que el dedo del scroll nunca se quede abajo.
             if let Some(c) = self.control() {
                 if let Some(falta) = self.rueda.revisar(&c, ancho, alto) {

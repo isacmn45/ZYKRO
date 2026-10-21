@@ -301,6 +301,70 @@ pub fn app_activa() -> Option<String> {
     texto.lines().find_map(|l| l.strip_prefix("package=").or_else(|| l.strip_prefix("Package=")).map(|p| p.trim().to_string()))
 }
 
+/// Una app abierta en Android (una tarea, como en la vista de recientes).
+#[derive(Clone)]
+pub struct Tarea {
+    /// Tarea raíz que la contiene: es lo que se quita para cerrarla.
+    pub raiz: u32,
+    pub paquete: String,
+}
+
+/// Apps abiertas, de la más reciente a la más vieja, sin el launcher. Android no tiene vista de
+/// recientes sin Quickstep, así que ZYKRO las saca de `am stack list` y las ordena con
+/// `dumpsys activity recents`.
+pub fn tareas_abiertas() -> Vec<Tarea> {
+    let consulta = "cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1; \
+                    echo ===; am stack list; echo ===; dumpsys activity recents | grep 'Recent #'";
+    let Ok(salida) = Command::new("docker").args(["exec", CONTENEDOR, "sh", "-c", consulta]).output() else { return Vec::new() };
+    let texto = String::from_utf8_lossy(&salida.stdout);
+    let mut partes = texto.split("===\n");
+    let inicio = partes.next().unwrap_or("").trim().split('/').next().unwrap_or("").to_string();
+    let (pila, recientes) = (partes.next().unwrap_or(""), partes.next().unwrap_or(""));
+
+    // Orden: "* Recent #0: Task{1412083 #16 type=home ...}" -> la tarea 16 es la más reciente.
+    let orden: Vec<u32> = recientes
+        .lines()
+        .filter_map(|l| l.split("Task{").nth(1)?.split_whitespace().nth(1)?.strip_prefix('#')?.parse().ok())
+        .collect();
+
+    let mut tareas = Vec::new();
+    let mut raiz = 0;
+    for linea in pila.lines() {
+        if let Some(resto) = linea.strip_prefix("RootTask id=") {
+            raiz = resto.split_whitespace().next().and_then(|n| n.parse().ok()).unwrap_or(0);
+        } else if let Some(resto) = linea.trim_start().strip_prefix("taskId=") {
+            // "taskId=17: com.android.settings/com.android.settings.Settings bounds=..."
+            let Some((id, resto)) = resto.split_once(": ") else { continue };
+            let componente = resto.split_whitespace().next().unwrap_or("");
+            let Some((paquete, actividad)) = componente.split_once('/') else { continue };
+            if paquete == inicio || actividad.contains("FallbackHome") {
+                continue;
+            }
+            let id: u32 = id.parse().unwrap_or(0);
+            tareas.push((orden.iter().position(|&o| o == id).unwrap_or(usize::MAX), Tarea { raiz, paquete: paquete.to_string() }));
+        }
+    }
+    tareas.sort_by_key(|(posicion, _)| *posicion);
+    tareas.into_iter().map(|(_, t)| t).collect()
+}
+
+/// Trae una app al frente como lo hace un launcher: con su intent de inicio, que reutiliza la tarea.
+pub fn abrir_app(paquete: &str) {
+    if !paquete.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_') {
+        return;
+    }
+    let orden = format!(
+        "C=$(cmd package resolve-activity --brief -c android.intent.category.LAUNCHER {paquete} | tail -1); \
+         am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n \"$C\""
+    );
+    docker(&["exec", CONTENEDOR, "sh", "-c", &orden]);
+}
+
+/// Cierra una app quitando su tarea raíz.
+pub fn cerrar_tarea(raiz: u32) {
+    docker(&["exec", CONTENEDOR, "am", "stack", "remove", &raiz.to_string()]);
+}
+
 /// Configuración de Android con la que está creado el contenedor.
 pub fn leer_config_android() -> Option<config::Android> {
     let salida = Command::new("docker").args(["inspect", CONTENEDOR]).output().ok()?;
@@ -405,6 +469,16 @@ fn comando_run(info: &serde_json::Value, nueva: &config::Android) -> Result<Vec<
 
 #[cfg(test)]
 mod pruebas {
+    /// Lista las apps abiertas del Android que está corriendo:
+    /// `cargo test tareas_reales -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn tareas_reales() {
+        for t in super::tareas_abiertas() {
+            println!("tarea raíz {}: {}", t.raiz, t.paquete);
+        }
+    }
+
     /// Muestra el comando que recrearía el contenedor actual, sin ejecutarlo:
     /// `cargo test comando_actual -- --ignored --nocapture`
     #[test]
