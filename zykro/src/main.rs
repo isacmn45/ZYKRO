@@ -13,7 +13,9 @@ mod mapeo;
 mod menu;
 mod raton;
 mod recientes;
+mod rendimiento;
 mod rueda;
+mod sensores;
 mod video;
 
 use std::path::PathBuf;
@@ -88,6 +90,8 @@ struct Zykro {
     menu: menu::Menu,
     /// Selector de apps abiertas (el botón Recientes), propio porque Android ya no tiene vista de recientes.
     recientes: recientes::Recientes,
+    /// Temperatura de CPU y GPU (la lee un hilo cada 2 s).
+    temperaturas: sensores::Compartidas,
     /// Se está mostrando la confirmación para cerrar ZYKRO.
     confirmar_cierre: bool,
     /// El usuario ya confirmó: el próximo pedido de cierre se deja pasar.
@@ -114,6 +118,7 @@ impl Zykro {
         let video: video::Compartido = Arc::default();
         android::iniciar(cc.egui_ctx.clone(), estado.clone(), video.clone());
         android::vigilar_texto(cc.egui_ctx.clone(), estado.clone());
+        aplicar_modo(&estado, estado.lock().unwrap().config.modo, false);
         let motor = Arc::new(Mutex::new(mapeo::Motor::new()));
         let raton_directo = Arc::new(AtomicBool::new(false));
         let raton_listo = Arc::new(AtomicBool::new(false));
@@ -137,6 +142,7 @@ impl Zykro {
             editor: editor::Editor::new(),
             menu: menu::Menu::default(),
             recientes: recientes::Recientes::default(),
+            temperaturas: sensores::iniciar(),
             confirmar_cierre: false,
             cierre_confirmado: false,
             mapeo_activo: false,
@@ -159,6 +165,9 @@ impl Zykro {
     fn aplicar_config(&mut self, nueva: config::Config) {
         nueva.guardar();
         let anterior = std::mem::replace(&mut self.estado.lock().unwrap().config, nueva.clone());
+        if nueva.modo != anterior.modo {
+            aplicar_modo(&self.estado, nueva.modo, nueva.android == anterior.android);
+        }
         if nueva.android != anterior.android {
             android::pedir_reinicio(&self.estado, nueva.android);
         } else {
@@ -418,6 +427,25 @@ impl Zykro {
                         ui.label(RichText::new(format!("{} FPS", self.fps)).color(TENUE).size(11.0));
                         // Refrescar el contador aunque Android no esté dibujando.
                         ctx.request_repaint_after(Duration::from_secs(1));
+                    }
+                    if self.config().mostrar_temperatura {
+                        let t = *self.temperaturas.lock().unwrap();
+                        let grados = |v: f32| format!("{v:.0} °C");
+                        let texto = match (t.cpu, t.gpu) {
+                            (Some(c), _) if t.gpu_en_cpu => format!("CPU/GPU {}", grados(c)),
+                            (Some(c), Some(g)) => format!("CPU {}  ·  GPU {}", grados(c), grados(g)),
+                            (Some(c), None) => format!("CPU {}", grados(c)),
+                            (None, Some(g)) => format!("GPU {}", grados(g)),
+                            (None, None) => String::new(),
+                        };
+                        if !texto.is_empty() {
+                            // Amarillo desde 80 °C y rojo desde 90 °C.
+                            let maxima = t.cpu.unwrap_or(0.0).max(t.gpu.unwrap_or(0.0));
+                            let color = if maxima >= 90.0 { CERRAR_HOVER } else if maxima >= 80.0 { ACENTO } else { TENUE };
+                            ui.add_space(6.0);
+                            ui.label(RichText::new(format!("{}  {texto}", ic::THERMOMETER_SIMPLE)).color(color).size(11.0));
+                            ctx.request_repaint_after(Duration::from_secs(2));
+                        }
                     }
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -740,6 +768,7 @@ impl eframe::App for Zykro {
 
     fn on_exit(&mut self) {
         self.cerrar_menu();
+        rendimiento::restaurar();
         if self.config().apagar_al_cerrar {
             android::apagar();
         }
@@ -807,6 +836,19 @@ fn logo(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
     ui.painter().circle_filled(rect.center(), 8.0, ACENTO);
     ui.painter().text(rect.center(), Align2::CENTER_CENTER, "Z", FontId::proportional(11.5), FONDO);
+}
+
+/// Aplica un modo de rendimiento en segundo plano. `avisar_ok`: avisar también si salió bien.
+fn aplicar_modo(estado: &android::EstadoCompartido, modo: rendimiento::Modo, avisar_ok: bool) {
+    let estado = estado.clone();
+    thread::spawn(move || {
+        let fallos = rendimiento::aplicar(modo);
+        if !fallos.is_empty() {
+            android::avisar(&estado, format!("{}: {}", modo.nombre(), fallos.join("; ")));
+        } else if avisar_ok {
+            android::avisar(&estado, format!("Modo {} activado", modo.nombre().to_lowercase()));
+        }
+    });
 }
 
 fn alternar_pantalla_completa(ctx: &egui::Context) {

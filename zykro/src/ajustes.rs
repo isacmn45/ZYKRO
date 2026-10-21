@@ -3,8 +3,12 @@
 use eframe::egui::{self, Align, Align2, FontId, Layout, RichText, Sense, Stroke, Vec2};
 use egui_phosphor::regular as ic;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use crate::config::Config;
-use crate::{ACENTO, FONDO, FONDO_HOVER, ICONO, NOMBRE, TENUE, TEXTO, VERSION};
+use crate::rendimiento::{self, Fabricante, Modo};
+use crate::{ACENTO, FONDO, FONDO_CONTROL, FONDO_HOVER, ICONO, NOMBRE, TENUE, TEXTO, VERSION};
 
 #[derive(Clone, Copy, PartialEq)]
 enum Pestana {
@@ -37,11 +41,19 @@ pub struct Ajustes {
     pestana: Pestana,
     borrador: Config,
     original: Config,
+    /// Se está pidiendo la contraseña para el permiso de la GPU.
+    pidiendo_permiso: Arc<AtomicBool>,
 }
 
 impl Ajustes {
     pub fn new() -> Self {
-        Ajustes { abierto: false, pestana: Pestana::General, borrador: Config::default(), original: Config::default() }
+        Ajustes {
+            abierto: false,
+            pestana: Pestana::General,
+            borrador: Config::default(),
+            original: Config::default(),
+            pidiendo_permiso: Arc::default(),
+        }
     }
 
     pub fn abrir(&mut self, actual: &Config) {
@@ -139,6 +151,7 @@ impl Ajustes {
         titulo(ui, "General");
         ui.checkbox(&mut self.borrador.apagar_al_cerrar, "Apagar Android al cerrar ZYKRO");
         ui.checkbox(&mut self.borrador.mostrar_fps, "Mostrar FPS en la barra de título");
+        ui.checkbox(&mut self.borrador.mostrar_temperatura, "Mostrar la temperatura de la CPU y la GPU en la barra de título");
         ui.checkbox(&mut self.borrador.ocultar_teclado, "Ocultar el teclado en pantalla de Android");
         nota(ui, "Con el teclado en pantalla oculto, escribe con el teclado de la laptop.");
     }
@@ -180,15 +193,52 @@ impl Ajustes {
     }
 
     fn rendimiento(&mut self, ui: &mut egui::Ui) {
-        titulo(ui, "Rendimiento");
+        titulo(ui, "Modo de rendimiento");
+        for modo in Modo::TODOS {
+            if opcion_modo(ui, modo, self.borrador.modo == modo).clicked() {
+                self.borrador.modo = modo;
+            }
+        }
+        nota(ui, &format!("{}  Cuanto más rendimiento, más se calienta el equipo y más energía gasta (en una laptop, la batería dura menos).", ic::THERMOMETER));
+        self.gpu(ui);
+
+        ui.add_space(4.0);
+        titulo(ui, "Texturas");
         let a = &mut self.borrador.android;
-        ui.checkbox(&mut a.lod_activado, "Simplificar texturas (LOD bias)");
+        ui.checkbox(&mut a.lod_activado, "Suavizar texturas");
         ui.add_enabled_ui(a.lod_activado, |ui| {
-            fila(ui, "Nivel", |ui| {
+            fila(ui, "Intensidad", |ui| {
                 ui.add(egui::Slider::new(&mut a.lod, 0.0..=4.0).step_by(0.25).fixed_decimals(2));
             });
         });
-        nota(ui, "Más alto = texturas más simples y más FPS en juegos pesados. 0.5 es un buen punto medio.");
+        nota(ui, "Las texturas (sobre todo las lejanas) se ven un poco más suaves y la GPU trabaja menos: más FPS en juegos pesados. 0.5 es un buen punto medio.");
+    }
+
+    /// La GPU detectada y, para Ultra, el permiso para ajustar su velocidad.
+    fn gpu(&mut self, ui: &mut egui::Ui) {
+        let Some(gpu) = rendimiento::gpu() else { return };
+        let tipo = if gpu.integrada { "integrada" } else { "dedicada" };
+        ui.label(RichText::new(format!("{}  GPU: {} ({tipo})", ic::GRAPHICS_CARD, gpu.nombre)).size(12.5).color(ICONO));
+        if gpu.fabricante == Fabricante::Nvidia {
+            nota(ui, "Con el driver propietario de NVIDIA, ZYKRO todavía no puede mostrar la imagen de Android (SwagPlayer usa otro camino para NVIDIA).");
+        }
+        if self.borrador.modo != Modo::Ultra || !rendimiento::gpu_ajustable() || rendimiento::gpu_permitida() {
+            return;
+        }
+        ui.horizontal(|ui| {
+            nota(ui, "Para que Ultra fije la velocidad de la GPU hace falta tu permiso (una sola vez).");
+            let pidiendo = self.pidiendo_permiso.load(Ordering::Relaxed);
+            let texto = if pidiendo { "Esperando…" } else { "Dar permiso" };
+            if ui.add_enabled(!pidiendo, egui::Button::new(texto)).clicked() {
+                let (pidiendo, ctx) = (self.pidiendo_permiso.clone(), ui.ctx().clone());
+                pidiendo.store(true, Ordering::Relaxed);
+                std::thread::spawn(move || {
+                    rendimiento::pedir_permiso_gpu();
+                    pidiendo.store(false, Ordering::Relaxed);
+                    ctx.request_repaint();
+                });
+            }
+        });
     }
 }
 
@@ -197,6 +247,28 @@ fn acerca(ui: &mut egui::Ui) {
     ui.label(RichText::new(format!("{NOMBRE} {VERSION}")).size(18.0).strong().color(TEXTO));
     ui.label(RichText::new("Emulador de Android para Linux.").color(ICONO));
     nota(ui, "Usa el Android de SwagPlayer (redroid con Houdini): video sin comprimir y control al estilo scrcpy.");
+}
+
+/// Un modo de rendimiento como opción elegible: ícono, nombre y descripción.
+fn opcion_modo(ui: &mut egui::Ui, modo: Modo, elegido: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 46.0), Sense::click());
+    let fondo = if elegido { FONDO_HOVER } else if resp.hovered() { FONDO_CONTROL } else { FONDO };
+    ui.painter().rect_filled(rect, 6.0, fondo);
+    if elegido {
+        ui.painter().rect_stroke(rect, 6.0, Stroke::new(1.5, ACENTO), egui::StrokeKind::Inside);
+    }
+    let glifo = match modo {
+        Modo::Ahorro => ic::LEAF,
+        Modo::Equilibrado => ic::SCALES,
+        Modo::Rendimiento => ic::LIGHTNING,
+        Modo::Ultra => ic::FIRE,
+    };
+    let color = if elegido { ACENTO } else { ICONO };
+    let y = rect.center().y;
+    ui.painter().text(egui::pos2(rect.min.x + 20.0, y), Align2::CENTER_CENTER, glifo, FontId::proportional(17.0), color);
+    ui.painter().text(egui::pos2(rect.min.x + 40.0, y - 8.0), Align2::LEFT_CENTER, modo.nombre(), FontId::proportional(13.5), TEXTO);
+    ui.painter().text(egui::pos2(rect.min.x + 40.0, y + 9.0), Align2::LEFT_CENTER, modo.descripcion(), FontId::proportional(11.5), TENUE);
+    resp
 }
 
 fn titulo(ui: &mut egui::Ui, texto: &str) {

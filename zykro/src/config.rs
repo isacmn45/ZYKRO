@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub apagar_al_cerrar: bool,
     pub mostrar_fps: bool,
+    pub mostrar_temperatura: bool,
+    /// Modo de rendimiento (se aplica sin reiniciar Android).
+    pub modo: crate::rendimiento::Modo,
     pub ocultar_teclado: bool,
     pub android: Android,
 }
@@ -28,7 +31,14 @@ pub struct Android {
 
 impl Default for Config {
     fn default() -> Self {
-        Config { apagar_al_cerrar: true, mostrar_fps: true, ocultar_teclado: true, android: Android::default() }
+        Config {
+            apagar_al_cerrar: true,
+            mostrar_fps: true,
+            mostrar_temperatura: true,
+            modo: crate::rendimiento::Modo::default(),
+            ocultar_teclado: true,
+            android: Android::default(),
+        }
     }
 }
 
