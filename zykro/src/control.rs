@@ -1,5 +1,6 @@
 //! Canal de control: mensajes que el cliente manda a swag-rust-server por `control.sock`.
-//! Tecla (0x00), toque (0x02) y scroll (0x03) son los de scrcpy; 0x12 y 0x14 son propios.
+//! Tecla (0x00) y toque (0x02) son los de scrcpy; 0x12 y 0x14 son propios. El scroll (0x03) no se
+//! usa: Android no lo aplica, y rueda.rs lo imita con un dedo.
 //! Formato completo en docs/investigacion.md.
 
 use std::io::{self, Write};
@@ -77,21 +78,6 @@ impl Control {
         m.extend_from_slice(&presion.to_be_bytes());
         m.extend_from_slice(&0u32.to_be_bytes()); // botón de acción
         m.extend_from_slice(&0u32.to_be_bytes()); // botones
-        self.enviar(m);
-    }
-
-    /// `h` y `v` van de -1.0 a 1.0.
-    pub fn scroll(&self, x: i32, y: i32, ancho: u16, alto: u16, h: f32, v: f32) {
-        let a_i16 = |f: f32| (f.clamp(-1.0, 1.0) * 32767.0) as i16;
-        let mut m = Vec::with_capacity(21);
-        m.push(0x03);
-        m.extend_from_slice(&x.to_be_bytes());
-        m.extend_from_slice(&y.to_be_bytes());
-        m.extend_from_slice(&ancho.to_be_bytes());
-        m.extend_from_slice(&alto.to_be_bytes());
-        m.extend_from_slice(&a_i16(h).to_be_bytes());
-        m.extend_from_slice(&a_i16(v).to_be_bytes());
-        m.extend_from_slice(&0u32.to_be_bytes());
         self.enviar(m);
     }
 }

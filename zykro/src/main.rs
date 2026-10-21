@@ -11,6 +11,7 @@ mod editor;
 mod mapeo;
 mod menu;
 mod raton;
+mod rueda;
 mod video;
 
 use std::path::PathBuf;
@@ -70,6 +71,8 @@ struct Zykro {
     atrasados: u32,
     lateral: bool,
     tocando: Option<Pos2>,
+    /// Scroll con la rueda o el touchpad, imitado arrastrando un dedo.
+    rueda: rueda::Rueda,
     fps: u32,
     cuadros_seg: u32,
     inicio_seg: Instant,
@@ -115,6 +118,7 @@ impl Zykro {
             atrasados: 0,
             lateral: true,
             tocando: None,
+            rueda: rueda::Rueda::default(),
             fps: 0,
             cuadros_seg: 0,
             inicio_seg: Instant::now(),
@@ -540,6 +544,12 @@ impl Zykro {
             } else if !en_borde && !self.ajustes.abierto && !self.menu.abierto() {
                 self.entrada(ctx, rect, ancho, alto);
             }
+            // Fuera de `entrada` también: que el dedo del scroll nunca se quede abajo.
+            if let Some(c) = self.control() {
+                if let Some(falta) = self.rueda.revisar(&c, ancho, alto) {
+                    ctx.request_repaint_after(falta);
+                }
+            }
         });
     }
 
@@ -600,15 +610,18 @@ impl Zykro {
                         control.toque(SOLTAR, 0, x, y, w, h);
                     }
                 }
-                Event::MouseWheel { unit, delta, .. } if !bloqueado => {
+                Event::MouseWheel { unit, delta, .. } if !bloqueado && self.tocando.is_none() => {
                     let Some(pos) = puntero.filter(|p| rect.contains(*p)) else { continue };
-                    let factor = match unit {
-                        MouseWheelUnit::Line => 1.0,
-                        MouseWheelUnit::Point => 1.0 / 40.0,
-                        MouseWheelUnit::Page => 3.0,
+                    // El dedo se mueve hacia donde va el contenido: rueda hacia abajo = dedo hacia arriba.
+                    let d = match unit {
+                        MouseWheelUnit::Point => delta * (ancho / rect.width()),
+                        MouseWheelUnit::Line => delta * rueda::PASO_RUEDA,
+                        MouseWheelUnit::Page => delta * alto * 0.8,
                     };
+                    // Margen de Android para distinguir arrastre de toque: 8 dp, con un poco de sobra.
+                    let umbral = 8.0 * self.config().android.dpi as f32 / 160.0 * 1.5;
                     let (x, y) = a_android(pos);
-                    control.scroll(x, y, w, h, delta.x * factor, delta.y * factor);
+                    self.rueda.mover(&control, (x as f32, y as f32), (d.x, d.y), umbral, ancho, alto);
                 }
                 Event::Key { key, pressed, repeat, modifiers, .. } => {
                     if key == egui::Key::F11 {
