@@ -592,11 +592,7 @@ impl Editor {
                 self.boton_tecla(ui, "Activar", &cambio, Objetivo::Cambio);
                 self.boton_tecla(ui, "Pausar", &pausa, Objetivo::Pausa);
                 if let Some(r) = &mut self.mapa.raton {
-                    // En el archivo, vertical = sensitivityX × sensitivityRatioY; aquí se muestran por separado.
-                    let mut vertical = r.sens * r.ratio_y;
-                    deslizador(ui, "Horizontal", &mut r.sens, 0.1..=5.0);
-                    deslizador(ui, "Vertical", &mut vertical, 0.1..=8.0);
-                    r.ratio_y = vertical / r.sens.max(0.01);
+                    sensibilidad(ui, r);
                     ui.checkbox(&mut r.disparo_con_clic, "Disparar con clic izquierdo");
                     if r.disparo_con_clic && r.disparo.is_none() {
                         r.disparo = Some(Punto::nuevo(r.inicio.x + 0.05, r.inicio.y + 0.2));
@@ -626,11 +622,22 @@ fn titulo(ui: &mut egui::Ui, glifo: &str, texto: &str) {
     });
 }
 
-fn deslizador(ui: &mut egui::Ui, texto: &str, valor: &mut f32, rango: std::ops::RangeInclusive<f32>) {
+fn deslizador(ui: &mut egui::Ui, texto: &str, valor: &mut f32, rango: std::ops::RangeInclusive<f32>) -> bool {
     ui.horizontal(|ui| {
         ui.add_sized(Vec2::new(78.0, 20.0), egui::Label::new(RichText::new(texto).color(ICONO)));
-        ui.add(egui::Slider::new(valor, rango).fixed_decimals(2));
-    });
+        ui.add(egui::Slider::new(valor, rango).logarithmic(true).fixed_decimals(2)).changed()
+    })
+    .inner
+}
+
+/// Sensibilidad horizontal y vertical de la puntería (la usan el editor y el menú rápido).
+/// En el archivo, vertical = sensitivityX × sensitivityRatioY; aquí se muestran por separado.
+/// Devuelve `true` si cambió.
+pub fn sensibilidad(ui: &mut egui::Ui, r: &mut Raton) -> bool {
+    let mut vertical = r.sens * r.ratio_y;
+    let cambio = deslizador(ui, "Horizontal", &mut r.sens, 0.1..=10.0) | deslizador(ui, "Vertical", &mut vertical, 0.1..=10.0);
+    r.ratio_y = vertical / r.sens.max(0.01);
+    cambio
 }
 
 /// Mosaico de un tipo de control en el panel (se arrastra a la pantalla o se hace clic).

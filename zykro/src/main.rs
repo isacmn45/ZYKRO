@@ -8,6 +8,7 @@ mod control;
 mod curva;
 mod editor;
 mod mapeo;
+mod menu;
 mod raton;
 mod video;
 
@@ -73,6 +74,8 @@ struct Zykro {
     raton_directo: Arc<AtomicBool>,
     raton_listo: Arc<AtomicBool>,
     editor: editor::Editor,
+    /// Menú rápido del botón de controles (sensibilidad), como el de BlueStacks.
+    menu: menu::Menu,
     /// El mapeo está convirtiendo teclas en toques en este momento.
     mapeo_activo: bool,
     cursor_bloqueado: bool,
@@ -114,6 +117,7 @@ impl Zykro {
             raton_directo,
             raton_listo,
             editor: editor::Editor::new(),
+            menu: menu::Menu::default(),
             mapeo_activo: false,
             cursor_bloqueado: false,
             apuntando_antes: false,
@@ -162,6 +166,35 @@ impl Zykro {
         self.editor.abrir(&paquete, mapa);
     }
 
+    /// Botón de controles: abre o cierra el menú rápido (o cierra el editor si está abierto).
+    fn boton_controles(&mut self, boton: &egui::Response, abajo: bool) {
+        if !boton.clicked() {
+            return;
+        }
+        if self.editor.abierto {
+            self.editor.abierto = false;
+        } else if self.menu.abierto() {
+            self.cerrar_menu();
+        } else {
+            self.menu.abrir(boton.rect, abajo);
+        }
+    }
+
+    /// Cierra el menú rápido y guarda la sensibilidad si cambió.
+    fn cerrar_menu(&mut self) {
+        if !self.menu.cerrar() {
+            return;
+        }
+        let (paquete, mapa) = {
+            let m = self.motor();
+            (m.paquete.clone(), m.mapa.clone())
+        };
+        if let Some(mapa) = mapa.filter(|_| !paquete.is_empty()) {
+            let ok = mapa.guardar(&paquete).is_ok();
+            android::avisar(&self.estado, if ok { "Sensibilidad guardada" } else { "No se pudo guardar la sensibilidad" });
+        }
+    }
+
     /// Decide si el mapeo está activo, bloquea el cursor en modo puntería y corre los temporizadores.
     fn actualizar_mapeo(&mut self, ctx: &egui::Context) {
         let (w, h) = self.dimensiones();
@@ -177,7 +210,12 @@ impl Zykro {
         let enfocada = ctx.input(|i| i.focused);
         let mut motor = self.motor.lock().unwrap();
         motor.fijar_salida(control.clone(), w, h);
-        let activo = motor.mapa.is_some() && !escribiendo && !self.editor.abierto && !self.ajustes.abierto && enfocada;
+        let activo = motor.mapa.is_some()
+            && !escribiendo
+            && !self.editor.abierto
+            && !self.ajustes.abierto
+            && !self.menu.abierto()
+            && enfocada;
         if self.mapeo_activo && !activo {
             if let Some(c) = &control {
                 motor.soltar_todo(c, w, h);
@@ -362,9 +400,8 @@ impl Zykro {
                         if icono(ui, ic::LIST, "Configuración", t, FONDO_HOVER).clicked() {
                             self.abrir_ajustes();
                         }
-                        if icono(ui, ic::GAME_CONTROLLER, "Controles del juego", t, FONDO_HOVER).clicked() {
-                            self.abrir_editor();
-                        }
+                        let boton = icono(ui, ic::GAME_CONTROLLER, "Controles del juego", t, FONDO_HOVER);
+                        self.boton_controles(&boton, true);
                     });
                 });
             });
@@ -386,9 +423,8 @@ impl Zykro {
                     if icono(ui, ic::GEAR, "Configuración", t, FONDO_HOVER).clicked() {
                         self.abrir_ajustes();
                     }
-                    if icono(ui, ic::KEYBOARD, "Controles del juego", t, FONDO_HOVER).clicked() {
-                        self.abrir_editor();
-                    }
+                    let boton = icono(ui, ic::KEYBOARD, "Controles del juego", t, FONDO_HOVER);
+                    self.boton_controles(&boton, false);
                     if icono(ui, ic::SPEAKER_HIGH, "Subir volumen", t, FONDO_HOVER).clicked() {
                         self.pulsar(24);
                     }
@@ -477,7 +513,7 @@ impl Zykro {
 
             if self.editor.abierto {
                 self.teclas_editor(ctx);
-            } else if !en_borde && !self.ajustes.abierto {
+            } else if !en_borde && !self.ajustes.abierto && !self.menu.abierto() {
                 self.entrada(ctx, rect, ancho, alto);
             }
         });
@@ -608,12 +644,25 @@ impl eframe::App for Zykro {
             }
         }
         self.pantalla(ui, en_borde);
+        let salida = {
+            let mut motor = self.motor.lock().unwrap();
+            self.menu.mostrar(ctx, motor.mapa.as_mut())
+        };
+        match salida {
+            menu::Salida::Nada => {}
+            menu::Salida::Cerrar => self.cerrar_menu(),
+            menu::Salida::Editor => {
+                self.cerrar_menu();
+                self.abrir_editor();
+            }
+        }
         if let Some(nueva) = self.ajustes.mostrar(ctx) {
             self.aplicar_config(nueva);
         }
     }
 
     fn on_exit(&mut self) {
+        self.cerrar_menu();
         if self.config().apagar_al_cerrar {
             android::apagar();
         }
