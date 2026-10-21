@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::control::{Control, BAJAR, MOVER, SOLTAR};
+use crate::curva;
 
 // ---------------------------------------------------------------------------------------------
 // Formato del archivo
@@ -63,20 +64,13 @@ pub struct Raton {
     pub sens: f32,
     #[serde(rename = "sensitivityRatioY", default = "uno")]
     pub ratio_y: f32,
-    #[serde(rename = "speedRatioX", default = "uno")]
-    pub vel_x: f32,
-    #[serde(rename = "speedRatioY", default = "uno")]
-    pub vel_y: f32,
+    /// Bit 0x4000 (`MODO_ABSOLUTO`): posición desde el ancla con la curva en X, como SwagPlayer por defecto.
+    #[serde(rename = "tweaks", alias = "Tweaks", default = "tweaks")]
+    pub tweaks: u32,
     #[serde(rename = "shootOnClick", default = "si")]
     pub disparo_con_clic: bool,
     #[serde(rename = "shootPos", default, skip_serializing_if = "Option::is_none")]
     pub disparo: Option<Punto>,
-    #[serde(rename = "adsEnabled", default)]
-    pub ads: bool,
-    #[serde(rename = "adsKey", default, skip_serializing_if = "Option::is_none")]
-    pub tecla_ads: Option<String>,
-    #[serde(rename = "adsSensMultiplier", default = "medio")]
-    pub mult_ads: f32,
     #[serde(rename = "suspendKey", default, skip_serializing_if = "Option::is_none")]
     pub tecla_pausa: Option<String>,
     #[serde(rename = "touchIdleTimeoutMs", default = "espera")]
@@ -89,26 +83,17 @@ pub struct Raton {
     pub limite_arr: f32,
     #[serde(rename = "panLimitBottom", default = "limite")]
     pub limite_aba: f32,
-    /// Suavizado por milisegundo (como SwagPlayer): fracción del camino que avanza el dedo en cada ms.
-    #[serde(rename = "smoothAlphaMin", default, skip_serializing_if = "Option::is_none")]
-    pub suave_min: Option<f32>,
-    #[serde(rename = "smoothAlphaMax", default, skip_serializing_if = "Option::is_none")]
-    pub suave_max: Option<f32>,
-    #[serde(rename = "smoothSpeedThresh", default, skip_serializing_if = "Option::is_none")]
-    pub suave_umbral: Option<f32>,
-    #[serde(rename = "adsSmoothAlphaMin", default, skip_serializing_if = "Option::is_none")]
-    pub ads_suave_min: Option<f32>,
-    #[serde(rename = "adsSmoothAlphaMax", default, skip_serializing_if = "Option::is_none")]
-    pub ads_suave_max: Option<f32>,
+    /// `speedRatio*`, `smoothAlpha*`, `velocityCurveK`, `ads*`... van aquí: SwagPlayer no los usa para
+    /// mover la cámara, así que ZYKRO tampoco.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
 
-fn medio() -> f32 {
-    0.5
+fn tweaks() -> u32 {
+    0x4042
 }
 fn espera() -> u64 {
-    2500
+    2000
 }
 fn limite() -> f32 {
     350.0
@@ -122,24 +107,15 @@ impl Raton {
             inicio,
             sens: 1.0,
             ratio_y: 1.0,
-            vel_x: 1.0,
-            vel_y: 1.0,
+            tweaks: tweaks(),
             disparo_con_clic: true,
             disparo: Some(Punto::nuevo(inicio.x + 0.05, inicio.y + 0.2)),
-            ads: true,
-            tecla_ads: Some("RightButton".into()),
-            mult_ads: 0.5,
             tecla_pausa: Some("Key_Control".into()),
-            espera_ms: 2500,
+            espera_ms: espera(),
             limite_izq: 350.0,
             limite_der: 350.0,
             limite_arr: 350.0,
             limite_aba: 350.0,
-            suave_min: Some(0.04),
-            suave_max: Some(0.55),
-            suave_umbral: Some(12.0),
-            ads_suave_min: None,
-            ads_suave_max: None,
             extra,
         }
     }
@@ -426,13 +402,22 @@ const ID_APUNTAR: u64 = 2;
 const ID_DISPARO: u64 = 3;
 const ID_ARRASTRE: u64 = 4;
 const ID_NODO: u64 = 100;
-/// Cuánto mueve la cámara cada unidad de movimiento del mouse con sensibilidad 1.
-const FACTOR_RATON: f32 = 0.55;
+/// Bit de `tweaks`: la posición se calcula desde el ancla con el total acumulado y la curva en X.
+const MODO_ABSOLUTO: u32 = 0x4000;
+/// `touchIdleTimeoutMs` cuando vale 0, como SwagPlayer.
+const ESPERA_POR_DEFECTO: Duration = Duration::from_millis(2000);
 
-/// Dedo de la cámara. `objetivo` es adonde mandó el mouse; `actual`, por donde va el dedo.
+/// Dedo de la cámara, como SwagPlayer: se baja en `startPos` y cada movimiento recalcula la posición
+/// desde ahí con todo lo que se movió el mouse.
 struct Apunte {
-    actual: Vec2,
-    objetivo: Vec2,
+    /// Donde se bajó el dedo, en píxeles de Android.
+    ancla: (f64, f64),
+    /// Cuentas del mouse desde que se bajó el dedo.
+    acumulado: (f64, f64),
+    /// Último punto mandado.
+    punto: (i32, i32),
+    /// Último movimiento, para levantar el dedo tras `touchIdleTimeoutMs`.
+    ultimo: Instant,
 }
 
 /// Toque programado (doble toque, varios toques, deslizar).
@@ -450,14 +435,11 @@ pub struct Motor {
     /// Modo puntería: el mouse mueve la cámara con el cursor bloqueado.
     pub apuntando: bool,
     pausa: bool,
-    ads: bool,
     presionadas: HashMap<String, bool>,
     dpad: Option<(i32, i32)>,
     apunte: Option<Apunte>,
     /// Posición del dedo en el botón de disparo mientras el clic izquierdo está presionado.
     disparo: Option<Vec2>,
-    /// La puntería avanza sola cada milisegundo (hilo de raton.rs) con suavizado.
-    suavizado_directo: bool,
     activos: HashMap<u64, (i32, i32)>,
     pendientes: Vec<Pendiente>,
     /// Canal de control y tamaño de pantalla, para el hilo que lee el mouse directo.
@@ -471,12 +453,10 @@ impl Motor {
             paquete: String::new(),
             apuntando: false,
             pausa: false,
-            ads: false,
             presionadas: HashMap::new(),
             dpad: None,
             apunte: None,
             disparo: None,
-            suavizado_directo: false,
             activos: HashMap::new(),
             pendientes: Vec::new(),
             salida: None,
@@ -487,35 +467,18 @@ impl Motor {
         self.salida = ctl.map(|c| (c, w, h));
     }
 
-    /// Movimiento leído directo del mouse (hilo de raton.rs). El dedo lo avanza `paso_directo`.
+    /// Movimiento leído directo del mouse (hilo de raton.rs): un mensaje por cada reporte del mouse.
     pub fn mover_directo(&mut self, delta: Vec2) {
         if let Some((c, w, h)) = self.salida.clone() {
-            self.suavizado_directo = true;
             self.mover(delta, &c, w, h);
         }
     }
 
-    /// Un paso de 1 ms del dedo de la cámara hacia donde mandó el mouse (hilo de raton.rs).
-    /// Igual que SwagPlayer: se manda la posición cada milisegundo aunque no cambie.
-    pub fn paso_directo(&mut self) {
-        let Some((c, w, h)) = self.salida.clone() else { return };
-        let Some(r) = self.mapa.as_ref().and_then(|m| m.raton.as_ref()) else { return };
-        let (min, max) = if self.ads {
-            (r.ads_suave_min.or(r.suave_min), r.ads_suave_max.or(r.suave_max))
-        } else {
-            (r.suave_min, r.suave_max)
-        };
-        let umbral = r.suave_umbral.unwrap_or(12.0).max(0.1);
-        let Some(a) = self.apunte.as_mut() else { return };
-        let falta = a.objetivo - a.actual;
-        let alfa = match (min, max) {
-            (Some(min), Some(max)) => (min + (max - min) * (falta.length() / umbral).clamp(0.0, 1.0)).clamp(0.005, 1.0),
-            _ => 1.0,
-        };
-        a.actual = if falta.length() < 0.05 { a.objetivo } else { a.actual + falta * alfa };
-        let (x, y) = (a.actual.x.round() as i32, a.actual.y.round() as i32);
-        c.toque(MOVER, ID_APUNTAR, x, y, w as u16, h as u16);
-        self.activos.insert(ID_APUNTAR, (x, y));
+    /// Levanta el dedo de la cámara si el mouse lleva quieto `touchIdleTimeoutMs` (hilo de raton.rs).
+    pub fn revisar_quieto_directo(&mut self) {
+        if let Some((c, w, h)) = self.salida.clone() {
+            self.revisar_quieto(&c, w, h);
+        }
     }
 
     /// Clic leído directo del mouse (hilo de raton.rs).
@@ -562,7 +525,6 @@ impl Motor {
         self.disparo = None;
         self.pendientes.clear();
         self.pausa = false;
-        self.ads = false;
     }
 
     /// Procesa una tecla (o botón del mouse). Devuelve `true` si está mapeada.
@@ -591,10 +553,6 @@ impl Motor {
                 if presionada {
                     self.soltar_apunte(ctl, w, h);
                 }
-                usada = true;
-            }
-            if r.ads && r.tecla_ads.as_deref() == Some(nombre) {
-                self.ads = presionada;
                 usada = true;
             }
         }
@@ -683,35 +641,58 @@ impl Motor {
         self.tecla(nombre, presionado, false, ctl, w, h)
     }
 
-    /// Movimiento del mouse en modo puntería. Como SwagPlayer, el dedo de la cámara nunca se
-    /// levanta ni se recentra: puede salirse de la pantalla y Android lo sigue aceptando. Así el
-    /// juego no pierde el arrastre (levantarlo causaba tirones y la mira se quedaba pegada al disparar).
+    /// Movimiento del mouse en modo puntería, con la fórmula de SwagPlayer (`delta` en cuentas crudas):
+    ///
+    /// ```text
+    /// x = ancla_x + S(sensX · acumulado_x)      S = curva::horizontal (sin MODO_ABSOLUTO, lineal)
+    /// y = ancla_y + sensX · ratioY · acumulado_y
+    /// ```
+    ///
+    /// No recorta a la pantalla ni recentra mientras se mueve: el dedo puede salirse y Android lo
+    /// sigue aceptando. Solo se levanta tras `touchIdleTimeoutMs` quieto (`revisar_quieto`).
     pub fn mover(&mut self, delta: Vec2, ctl: &Control, w: f32, h: f32) {
         let Some(r) = self.mapa.as_ref().and_then(|m| m.raton.clone()) else { return };
-        if !self.cursor_bloqueado() {
+        if !self.cursor_bloqueado() || delta == Vec2::ZERO {
             return;
         }
-        let escala = FACTOR_RATON * w / 1280.0 * if self.ads { r.mult_ads } else { 1.0 };
-        let d = Vec2::new(delta.x * r.sens * r.vel_x, delta.y * r.sens * r.ratio_y * r.vel_y) * escala;
-        let inicio = Vec2::new(r.inicio.x * w, r.inicio.y * h);
         let apunte = self.apunte.get_or_insert_with(|| {
-            ctl.toque(BAJAR, ID_APUNTAR, inicio.x as i32, inicio.y as i32, w as u16, h as u16);
-            Apunte { actual: inicio, objetivo: inicio }
+            let ancla = (r.inicio.x as f64 * w as f64, r.inicio.y as f64 * h as f64);
+            let punto = (ancla.0 as i32, ancla.1 as i32);
+            ctl.toque(BAJAR, ID_APUNTAR, punto.0, punto.1, w as u16, h as u16);
+            Apunte { ancla, acumulado: (0.0, 0.0), punto, ultimo: Instant::now() }
         });
-        apunte.objetivo += d;
-        // Solo por seguridad tras mucho rato: recentrar si el dedo se fue demasiado lejos.
-        if apunte.objetivo.x.abs() > 30000.0 || apunte.objetivo.y.abs() > 30000.0 {
-            ctl.toque(SOLTAR, ID_APUNTAR, apunte.actual.x as i32, apunte.actual.y as i32, w as u16, h as u16);
-            ctl.toque(BAJAR, ID_APUNTAR, inicio.x as i32, inicio.y as i32, w as u16, h as u16);
-            *apunte = Apunte { actual: inicio, objetivo: inicio };
+        apunte.acumulado.0 += delta.x as f64;
+        apunte.acumulado.1 += delta.y as f64;
+        apunte.ultimo = Instant::now();
+        let (sens_x, sens_y) = (r.sens as f64, r.sens as f64 * r.ratio_y as f64);
+        let dx = if r.tweaks & MODO_ABSOLUTO != 0 {
+            curva::horizontal(sens_x * apunte.acumulado.0)
+        } else {
+            sens_x * apunte.acumulado.0
+        };
+        // Se trunca igual que SwagPlayer (hacia cero).
+        let punto = ((apunte.ancla.0 + dx) as i32, (apunte.ancla.1 + sens_y * apunte.acumulado.1) as i32);
+        apunte.punto = punto;
+        ctl.toque(MOVER, ID_APUNTAR, punto.0, punto.1, w as u16, h as u16);
+        self.activos.insert(ID_APUNTAR, punto);
+    }
+
+    /// Como SwagPlayer: tras `touchIdleTimeoutMs` sin mover el mouse se levanta el dedo de la cámara.
+    /// El siguiente movimiento lo vuelve a bajar en `startPos` con el acumulado en 0.
+    fn revisar_quieto(&mut self, ctl: &Control, w: f32, h: f32) {
+        if self.espera_quieto() == Some(Duration::ZERO) {
+            if let Some(a) = self.apunte.take() {
+                self.tocar(ctl, SOLTAR, ID_APUNTAR, a.punto.0, a.punto.1, w, h);
+            }
         }
-        if !self.suavizado_directo {
-            // Sin el hilo del mouse: el dedo va directo adonde mandó el mouse.
-            apunte.actual = apunte.objetivo;
-            let (x, y) = (apunte.actual.x as i32, apunte.actual.y as i32);
-            ctl.toque(MOVER, ID_APUNTAR, x, y, w as u16, h as u16);
-        }
-        self.activos.insert(ID_APUNTAR, (apunte.actual.x as i32, apunte.actual.y as i32));
+    }
+
+    /// Cuánto falta para levantar el dedo de la cámara por estar quieto (`None` si no está abajo).
+    pub fn espera_quieto(&self) -> Option<Duration> {
+        let a = self.apunte.as_ref()?;
+        let ms = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).map_or(0, |r| r.espera_ms);
+        let espera = if ms == 0 { ESPERA_POR_DEFECTO } else { Duration::from_millis(ms) };
+        Some(espera.saturating_sub(a.ultimo.elapsed()))
     }
 
     /// Temporizadores: toques programados y soltar el dedo de la cámara si el mouse se quedó quieto.
@@ -722,6 +703,7 @@ impl Motor {
         for p in listos {
             self.tocar(ctl, p.accion, p.dedo, p.x, p.y, w, h);
         }
+        self.revisar_quieto(ctl, w, h);
     }
 
     /// Hay algo pendiente que necesita que la interfaz siga refrescando.
@@ -742,7 +724,7 @@ impl Motor {
 
     fn soltar_apunte(&mut self, ctl: &Control, w: f32, h: f32) {
         if let Some(a) = self.apunte.take() {
-            self.tocar(ctl, SOLTAR, ID_APUNTAR, a.actual.x as i32, a.actual.y as i32, w, h);
+            self.tocar(ctl, SOLTAR, ID_APUNTAR, a.punto.0, a.punto.1, w, h);
         }
         if let Some(pos) = self.disparo.take() {
             self.tocar(ctl, SOLTAR, ID_DISPARO, pos.x as i32, pos.y as i32, w, h);
@@ -773,6 +755,47 @@ impl Motor {
 #[cfg(test)]
 mod pruebas {
     use super::*;
+
+    /// La puntería manda lo mismo que SwagPlayer: bajar en `startPos` y luego la posición calculada
+    /// desde el ancla con el total acumulado (curva en X, lineal en Y), un toque por movimiento.
+    #[test]
+    fn punteria_como_swagplayer() {
+        use std::io::Read;
+        use std::os::unix::net::UnixListener;
+
+        let ruta = std::env::temp_dir().join(format!("zykro-prueba-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&ruta);
+        let servidor = UnixListener::bind(&ruta).unwrap();
+        let ctl = Control::conectar(ruta.to_str().unwrap(), false, 0.0).unwrap();
+        let (mut socket, _) = servidor.accept().unwrap();
+        let _ = std::fs::remove_file(&ruta);
+
+        let mut r = Raton::nuevo(Punto::nuevo(0.79366535, 0.48994160));
+        (r.sens, r.ratio_y) = (1.35, 1.15);
+        let mut motor = Motor::new();
+        motor.mapa = Some(Mapa { raton: Some(r), ..Mapa::default() });
+        motor.apuntando = true;
+        let (w, h) = (1280.0, 720.0);
+        for d in [Vec2::new(10.0, 0.0), Vec2::new(0.0, 10.0), Vec2::new(-400.0, 3.0)] {
+            motor.mover(d, &ctl, w, h);
+        }
+        drop(ctl);
+
+        let mut datos = Vec::new();
+        socket.read_to_end(&mut datos).unwrap();
+        let inicio = 2 + datos[1] as usize + 6; // 0x12 (layout) y 0x14
+        let toques: Vec<(u8, i32, i32)> = datos[inicio..]
+            .chunks_exact(32)
+            .map(|m| {
+                assert_eq!(m[0], 0x02);
+                let i32_en = |i: usize| i32::from_be_bytes(m[i..i + 4].try_into().unwrap());
+                (m[1], i32_en(10), i32_en(14))
+            })
+            .collect();
+        // Calculado aparte en Python con el spline de SwagPlayer: x = 1015.9 + S(1.35·acum_x),
+        // y = 352.8 + 1.5525·acum_y, acumulando (10, 0), (10, 10) y (−390, 13).
+        assert_eq!(toques, vec![(BAJAR, 1015, 352), (MOVER, 1028, 352), (MOVER, 1028, 368), (MOVER, 792, 372)]);
+    }
 
     /// Lee el mapeo de Free Fire de SwagPlayer y comprueba que al volver a guardarlo no se pierde
     /// nada: `cargo test ida_y_vuelta -- --ignored --nocapture`

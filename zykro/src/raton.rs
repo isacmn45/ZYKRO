@@ -1,5 +1,6 @@
-//! Lectura directa del mouse (evdev) para la puntería, como SwagPlayer: cada movimiento y clic se
-//! manda a Android al instante, sin esperar a que la ventana se vuelva a dibujar.
+//! Lectura directa del mouse (evdev) para la puntería, como SwagPlayer: cada reporte del mouse se
+//! manda a Android al instante (con un mouse de 1000 Hz, un toque por milisegundo), sin esperar a
+//! que la ventana se vuelva a dibujar.
 
 use std::fs::File;
 use std::io::Read;
@@ -21,8 +22,8 @@ const EV_REL: u16 = 2;
 const REL_X: u16 = 0;
 const REL_Y: u16 = 1;
 const TAM_EVENTO: usize = 24; // struct input_event en 64 bits
-/// Cada cuánto avanza y se manda el dedo de la cámara (1 ms, como SwagPlayer).
-const PASO: Duration = Duration::from_millis(1);
+/// Cada cuánto se mira si el mouse lleva quieto `touchIdleTimeoutMs` (como el tick de 16 ms de SwagPlayer).
+const REVISION: Duration = Duration::from_millis(16);
 
 /// `activo`: la ventana lo prende mientras la puntería está activa con el cursor bloqueado.
 /// `listo`: el hilo lo prende si pudo abrir algún mouse (si no, la ventana usa sus propios eventos).
@@ -41,10 +42,10 @@ pub fn iniciar(motor: Arc<Mutex<Motor>>, activo: Arc<AtomicBool>, listo: Arc<Ato
             let mut pendiente = vec![Vec2::ZERO; ratones.len()];
             let mut botones: Vec<Vec<(PointerButton, bool)>> = vec![Vec::new(); ratones.len()];
             let mut buf = [0u8; TAM_EVENTO * 64];
-            let mut ultimo_paso = Instant::now();
+            let mut ultima_revision = Instant::now();
             while Instant::now() < revisar {
                 let apuntando = activo.load(Ordering::Relaxed);
-                let espera = if apuntando { 1u16 } else { 200 };
+                let espera = if apuntando { REVISION.as_millis() as u16 } else { 200 };
                 let listos: Vec<bool> = {
                     let mut fds: Vec<PollFd> = ratones.iter().map(|f| PollFd::new(f.as_fd(), PollFlags::POLLIN)).collect();
                     if poll(&mut fds, PollTimeout::from(espera)).is_err() {
@@ -87,9 +88,9 @@ pub fn iniciar(motor: Arc<Mutex<Motor>>, activo: Arc<AtomicBool>, listo: Arc<Ato
                         }
                     }
                 }
-                if apuntando && ultimo_paso.elapsed() >= PASO {
-                    motor.lock().unwrap().paso_directo();
-                    ultimo_paso = Instant::now();
+                if apuntando && ultima_revision.elapsed() >= REVISION {
+                    motor.lock().unwrap().revisar_quieto_directo();
+                    ultima_revision = Instant::now();
                 }
             }
             ratones.clear();

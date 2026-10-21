@@ -5,6 +5,7 @@ mod ajustes;
 mod android;
 mod config;
 mod control;
+mod curva;
 mod editor;
 mod mapeo;
 mod raton;
@@ -208,6 +209,10 @@ impl Zykro {
             }
             if motor.ocupado() {
                 ctx.request_repaint_after(Duration::from_millis(8));
+            }
+            // Sin el hilo del mouse, aquí se levanta el dedo de la cámara cuando se queda quieto.
+            if let Some(falta) = motor.espera_quieto() {
+                ctx.request_repaint_after(falta);
             }
         }
     }

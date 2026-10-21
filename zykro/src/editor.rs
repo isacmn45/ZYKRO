@@ -601,11 +601,6 @@ impl Editor {
                     if r.disparo_con_clic && r.disparo.is_none() {
                         r.disparo = Some(Punto::nuevo(r.inicio.x + 0.05, r.inicio.y + 0.2));
                     }
-                    ui.checkbox(&mut r.ads, "Mira con clic derecho (menos sensibilidad)");
-                    if r.ads {
-                        r.tecla_ads.get_or_insert_with(|| "RightButton".into());
-                        deslizador(ui, "Al apuntar", &mut r.mult_ads, 0.1..=1.0);
-                    }
                 }
             }
         }
