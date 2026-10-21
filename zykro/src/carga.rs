@@ -62,7 +62,9 @@ pub fn dibujar(ui: &egui::Ui, area: Rect, v: &Vista) {
 
     // Mensaje: la primera línea es el estado; las demás, pistas.
     let mut lineas = v.mensaje.lines();
-    let primera = lineas.next().unwrap_or("Iniciando Android…");
+    // Sin mensaje: aún no arrancó nada o ya conectó y falta el primer cuadro.
+    let espera = if v.etapa == Etapa::Conectar { "Esperando la imagen de Android…" } else { "Iniciando Android…" };
+    let primera = lineas.next().unwrap_or(espera);
     let segundos = v.desde.map(|d| d.elapsed().as_secs()).filter(|s| *s >= 3 && !v.error && v.etapa != Etapa::Conectar);
     let texto = match segundos {
         Some(s) => format!("{primera}  ·  {s} s"),

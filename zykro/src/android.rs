@@ -3,6 +3,7 @@
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -155,18 +156,48 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
     let control = Control::conectar(&ruta_control, android.lod_activado, android.lod)?;
 
     // El servidor no manda nada hasta que la pantalla cambia: apagar y prender la pantalla la redibuja.
+    // El servidor atiende a un solo cliente y, si el anterior se cerró de golpe, no se entera hasta
+    // que le toca mandar un cuadro: nuestra conexión se queda en cola y no llega la cabecera.
+    // Tras dos intentos se reinicia el servidor y se vuelve a conectar.
     socket_video.set_read_timeout(Some(Duration::from_secs(4)))?;
+    let mut intentos = 0;
     let pantalla = loop {
-        control.pulsar(223); // KEYCODE_SLEEP
-        thread::sleep(Duration::from_millis(250));
-        control.pulsar(224); // KEYCODE_WAKEUP
+        redibujar(&control);
         match video::leer_cabecera(&mut socket_video) {
             Ok(p) => break p,
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                intentos += 1;
+                if intentos >= 2 {
+                    reiniciar_servidor();
+                    return Err(std::io::Error::other("El servidor de video no respondía: se reinició"));
+                }
+            }
             Err(e) => return Err(e),
         }
     };
     socket_video.set_read_timeout(None)?;
+
+    // A veces, tras la cabecera, el primer cuadro no llega; con la pantalla quieta (escritorio,
+    // menús) el servidor no manda otro y se quedaba la pantalla de carga hasta tocar algo.
+    // Si en 1.5 s no llegó ninguno, se vuelve a redibujar (hasta 3 veces); si ni así, el servidor
+    // está trabado: se reinicia y la conexión cortada hace que se vuelva a conectar.
+    let llego = Arc::new(AtomicBool::new(false));
+    {
+        let (llego, control) = (llego.clone(), control.clone());
+        thread::spawn(move || {
+            for intento in 0..4 {
+                thread::sleep(Duration::from_millis(1500));
+                if llego.load(Ordering::Relaxed) {
+                    return;
+                }
+                if intento < 3 {
+                    redibujar(&control);
+                } else {
+                    reiniciar_servidor();
+                }
+            }
+        });
+    }
 
     {
         let mut s = estado.lock().unwrap();
@@ -180,7 +211,22 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
     }
 
     let ctx2 = ctx.clone();
-    video::recibir_cuadros(socket_video, destino.clone(), move || ctx2.request_repaint())
+    video::recibir_cuadros(socket_video, destino.clone(), move || {
+        llego.store(true, Ordering::Relaxed);
+        ctx2.request_repaint();
+    })
+}
+
+/// Reinicia swag-rust-server (un servicio de Android) sin reiniciar Android; corta sus conexiones.
+fn reiniciar_servidor() {
+    docker(&["exec", CONTENEDOR, "setprop", "ctl.restart", "swag-rust-server"]);
+}
+
+/// Apaga y prende la pantalla de Android para que se redibuje (y el servidor mande un cuadro).
+fn redibujar(control: &Control) {
+    control.pulsar(223); // KEYCODE_SLEEP
+    thread::sleep(Duration::from_millis(250));
+    control.pulsar(224); // KEYCODE_WAKEUP
 }
 
 /// Usa teclado-android (de swagplayer-mods) para que Android no muestre su teclado en pantalla.
