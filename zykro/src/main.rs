@@ -3,6 +3,7 @@
 
 mod ajustes;
 mod android;
+mod carga;
 mod config;
 mod control;
 mod curva;
@@ -486,11 +487,18 @@ impl Zykro {
         let ctx = &ctx;
         egui::CentralPanel::default().frame(egui::Frame::new().fill(Color32::BLACK)).show(raiz, |ui| {
             let area = ui.max_rect();
-            let (ancho, alto, mensaje, aviso) = {
+            let (ancho, alto, carga, aviso) = {
                 let s = self.estado.lock().unwrap();
                 let (w, h) = s.pantalla.unwrap_or((1280, 720));
                 let aviso = s.aviso.as_ref().filter(|(_, t)| t.elapsed() < Duration::from_millis(2500)).map(|a| a.0.clone());
-                (w as f32, h as f32, s.mensaje.clone(), aviso)
+                let carga = carga::Vista {
+                    etapa: s.etapa,
+                    desde: s.etapa_desde,
+                    mensaje: s.mensaje.clone(),
+                    error: s.error,
+                    sobre_video: self.textura.is_some(),
+                };
+                (w as f32, h as f32, carga, aviso)
             };
             let escala = (area.width() / ancho).min(area.height() / alto);
             let rect = Rect::from_center_size(area.center(), Vec2::new(ancho * escala, alto * escala));
@@ -514,12 +522,9 @@ impl Zykro {
                 ui.painter().rect_filled(caja, 12.0, FONDO.gamma_multiply(0.92));
                 ui.painter().galley(caja.center() - galeria.size() / 2.0, galeria, TEXTO);
             }
-            if self.textura.is_none() || !mensaje.is_empty() {
-                if self.textura.is_some() {
-                    ui.painter().rect_filled(area, 0.0, Color32::from_black_alpha(170));
-                }
-                pantalla_de_espera(ui, area, &mensaje);
-                ctx.request_repaint_after(Duration::from_millis(100));
+            if self.textura.is_none() || !carga.mensaje.is_empty() {
+                carga::dibujar(ui, area, &carga);
+                ctx.request_repaint_after(Duration::from_millis(16));
             }
             if let Some(texto) = aviso {
                 let pos = area.right_bottom() - Vec2::new(12.0, 12.0);
@@ -749,21 +754,6 @@ fn logo(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
     ui.painter().circle_filled(rect.center(), 8.0, ACENTO);
     ui.painter().text(rect.center(), Align2::CENTER_CENTER, "Z", FontId::proportional(11.5), FONDO);
-}
-
-fn pantalla_de_espera(ui: &mut egui::Ui, area: Rect, mensaje: &str) {
-    let centro = area.center();
-    let t = ui.input(|i| i.time) as f32;
-    // Círculo girando, en el color del logo.
-    let puntos: Vec<Pos2> = (0..=24)
-        .map(|i| {
-            let a = t * 4.0 + i as f32 / 24.0 * std::f32::consts::PI * 1.4;
-            centro - Vec2::new(0.0, 30.0) + Vec2::angled(a) * 18.0
-        })
-        .collect();
-    ui.painter().add(Shape::line(puntos, Stroke::new(3.0, ACENTO)));
-    let texto = if mensaje.is_empty() { "Iniciando Android…" } else { mensaje };
-    ui.painter().text(centro + Vec2::new(0.0, 16.0), Align2::CENTER_TOP, texto, FontId::proportional(14.0), TEXTO);
 }
 
 fn alternar_pantalla_completa(ctx: &egui::Context) {

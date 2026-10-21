@@ -16,10 +16,24 @@ use crate::video::{self, Compartido};
 pub const CONTENEDOR: &str = "redroid-redroid-1";
 const SOCKETS: &str = "/tmp/swag_sockets";
 
+/// Paso del arranque en el que está Android (para la pantalla de carga).
+#[derive(Clone, Copy, Default, PartialEq)]
+pub enum Etapa {
+    #[default]
+    Encender,
+    Arrancar,
+    Conectar,
+}
+
 #[derive(Default)]
 pub struct Estado {
     /// Texto que se muestra mientras no hay video (vacío cuando todo va bien).
     pub mensaje: String,
+    pub etapa: Etapa,
+    /// Desde cuándo está en la etapa actual.
+    pub etapa_desde: Option<Instant>,
+    /// El mensaje es un error (se reintenta solo).
+    pub error: bool,
     /// Aviso corto en la esquina (captura guardada, APK instalada...).
     pub aviso: Option<(String, Instant)>,
     pub control: Option<Control>,
@@ -51,8 +65,20 @@ fn corriendo() -> bool {
         .unwrap_or(false)
 }
 
-fn mensaje(estado: &EstadoCompartido, texto: impl Into<String>) {
-    estado.lock().unwrap().mensaje = texto.into();
+fn mensaje(estado: &EstadoCompartido, etapa: Etapa, texto: impl Into<String>) {
+    let mut s = estado.lock().unwrap();
+    if s.etapa != etapa || s.etapa_desde.is_none() {
+        s.etapa = etapa;
+        s.etapa_desde = Some(Instant::now());
+    }
+    s.mensaje = texto.into();
+    s.error = false;
+}
+
+fn error(estado: &EstadoCompartido, texto: impl Into<String>) {
+    let mut s = estado.lock().unwrap();
+    s.mensaje = texto.into();
+    s.error = true;
 }
 
 pub fn avisar(estado: &EstadoCompartido, texto: impl Into<String>) {
@@ -66,10 +92,10 @@ pub fn iniciar(ctx: egui::Context, estado: EstadoCompartido, destino: Compartido
         .spawn(move || loop {
             let pendiente = estado.lock().unwrap().reinicio.take();
             if let Some(nueva) = pendiente {
-                mensaje(&estado, "Reiniciando Android con la nueva configuración…");
+                mensaje(&estado, Etapa::Encender, "Reiniciando Android con la nueva configuración…");
                 ctx.request_repaint();
                 if let Err(e) = recrear(&nueva) {
-                    mensaje(&estado, format!("No se pudo aplicar la configuración: {e}"));
+                    error(&estado, format!("No se pudo aplicar la configuración: {e}"));
                     ctx.request_repaint();
                     thread::sleep(Duration::from_secs(4));
                 }
@@ -80,6 +106,7 @@ pub fn iniciar(ctx: egui::Context, estado: EstadoCompartido, destino: Compartido
                     s.control = None;
                     if s.reinicio.is_none() {
                         s.mensaje = format!("{e}\nReintentando…");
+                        s.error = true;
                     }
                     s.reinicio.is_some()
                 };
@@ -94,14 +121,14 @@ pub fn iniciar(ctx: egui::Context, estado: EstadoCompartido, destino: Compartido
 
 fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &Compartido) -> std::io::Result<()> {
     if !corriendo() {
-        mensaje(estado, "Encendiendo Android…");
+        mensaje(estado, Etapa::Encender, "Encendiendo Android…");
         ctx.request_repaint();
         if !docker(&["start", CONTENEDOR]) {
             return Err(std::io::Error::other("No se pudo encender Android. ¿Está corriendo Docker?"));
         }
     }
 
-    mensaje(estado, "Esperando a Android…");
+    mensaje(estado, Etapa::Arrancar, "Esperando a Android…");
     ctx.request_repaint();
     let ruta_video = format!("{SOCKETS}/video.sock");
     let ruta_control = format!("{SOCKETS}/control.sock");
@@ -112,13 +139,13 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
         }
         if inicio.elapsed() > Duration::from_secs(20) {
             // El servidor borra video.sock cuando otro cliente se conecta.
-            mensaje(estado, "Esperando a Android…\n¿SwagPlayer está abierto? Ciérralo: solo uno puede conectarse.");
+            mensaje(estado, Etapa::Arrancar, "Esperando a Android…\n¿SwagPlayer está abierto? Ciérralo: solo uno puede conectarse.");
             ctx.request_repaint();
         }
         thread::sleep(Duration::from_millis(300));
     }
 
-    mensaje(estado, "Conectando…");
+    mensaje(estado, Etapa::Conectar, "Conectando…");
     ctx.request_repaint();
     let (android, ocultar_teclado) = {
         let s = estado.lock().unwrap();
@@ -146,6 +173,7 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
         s.control = Some(control);
         s.pantalla = Some((pantalla.ancho, pantalla.alto));
         s.mensaje.clear();
+        s.error = false;
     }
     if ocultar_teclado {
         ocultar_teclado_en_pantalla();
