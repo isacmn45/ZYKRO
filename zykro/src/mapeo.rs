@@ -89,12 +89,6 @@ pub struct Raton {
     pub limite_arr: f32,
     #[serde(rename = "panLimitBottom", default = "limite")]
     pub limite_aba: f32,
-    #[serde(rename = "smoothAlphaMin", default, skip_serializing_if = "Option::is_none")]
-    pub suave_min: Option<f32>,
-    #[serde(rename = "smoothAlphaMax", default, skip_serializing_if = "Option::is_none")]
-    pub suave_max: Option<f32>,
-    #[serde(rename = "smoothSpeedThresh", default, skip_serializing_if = "Option::is_none")]
-    pub suave_umbral: Option<f32>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -130,9 +124,6 @@ impl Raton {
             limite_der: 350.0,
             limite_arr: 350.0,
             limite_aba: 350.0,
-            suave_min: None,
-            suave_max: None,
-            suave_umbral: None,
             extra,
         }
     }
@@ -424,7 +415,6 @@ const FACTOR_RATON: f32 = 0.55;
 
 struct Apunte {
     actual: Vec2,
-    suave: Vec2,
     ultimo: Instant,
 }
 
@@ -451,6 +441,8 @@ pub struct Motor {
     disparo: Option<Vec2>,
     activos: HashMap<u64, (i32, i32)>,
     pendientes: Vec<Pendiente>,
+    /// Canal de control y tamaño de pantalla, para el hilo que lee el mouse directo.
+    salida: Option<(Control, f32, f32)>,
 }
 
 impl Motor {
@@ -467,6 +459,25 @@ impl Motor {
             disparo: None,
             activos: HashMap::new(),
             pendientes: Vec::new(),
+            salida: None,
+        }
+    }
+
+    pub fn fijar_salida(&mut self, ctl: Option<Control>, w: f32, h: f32) {
+        self.salida = ctl.map(|c| (c, w, h));
+    }
+
+    /// Movimiento leído directo del mouse (hilo de raton.rs).
+    pub fn mover_directo(&mut self, delta: Vec2) {
+        if let Some((c, w, h)) = self.salida.clone() {
+            self.mover(delta, &c, w, h);
+        }
+    }
+
+    /// Clic leído directo del mouse (hilo de raton.rs).
+    pub fn boton_directo(&mut self, boton: PointerButton, presionado: bool) {
+        if let Some((c, w, h)) = self.salida.clone() {
+            self.boton(boton, presionado, &c, w, h);
         }
     }
 
@@ -649,31 +660,27 @@ impl Motor {
 
         let mut apunte = self.apunte.take().unwrap_or_else(|| {
             ctl.toque(BAJAR, ID_APUNTAR, inicio.x as i32, inicio.y as i32, w as u16, h as u16);
-            Apunte { actual: inicio, suave: Vec2::ZERO, ultimo: Instant::now() }
+            Apunte { actual: inicio, ultimo: Instant::now() }
         });
-        // Suavizado: más suave en movimientos lentos y directo en los rápidos.
-        apunte.suave = match (r.suave_min, r.suave_max) {
-            (Some(min), Some(max)) => {
-                let umbral = r.suave_umbral.unwrap_or(12.0).max(0.1);
-                let alfa = min + (max - min) * (objetivo.length() / umbral).clamp(0.0, 1.0);
-                apunte.suave + (objetivo - apunte.suave) * alfa.clamp(0.01, 1.0)
-            }
-            _ => objetivo,
-        };
-        let mut nuevo = apunte.actual + apunte.suave;
+        // Sin suavizado: cada movimiento llega tal cual para que no haya retraso.
+        let mut nuevo = apunte.actual + objetivo;
+        // Cada recentrado levanta el dedo y el juego pierde ese movimiento (se siente como un tirón),
+        // así que el dedo recorre al menos el 30% de la pantalla antes de volver al centro.
         let k = w / 1920.0;
-        let fuera = nuevo.x < inicio.x - r.limite_izq * k
-            || nuevo.x > inicio.x + r.limite_der * k
-            || nuevo.y < inicio.y - r.limite_arr * k
-            || nuevo.y > inicio.y + r.limite_aba * k
-            || nuevo.x <= 0.0
-            || nuevo.y <= 0.0
-            || nuevo.x >= w - 1.0
-            || nuevo.y >= h - 1.0;
+        let (lim_x, lim_y) = (0.3 * w, 0.3 * h);
+        let margen = 0.02 * w;
+        let fuera = nuevo.x < inicio.x - (r.limite_izq * k).max(lim_x)
+            || nuevo.x > inicio.x + (r.limite_der * k).max(lim_x)
+            || nuevo.y < inicio.y - (r.limite_arr * k).max(lim_y)
+            || nuevo.y > inicio.y + (r.limite_aba * k).max(lim_y)
+            || nuevo.x <= margen
+            || nuevo.y <= margen
+            || nuevo.x >= w - margen
+            || nuevo.y >= h - margen;
         if fuera {
             ctl.toque(SOLTAR, ID_APUNTAR, apunte.actual.x as i32, apunte.actual.y as i32, w as u16, h as u16);
             ctl.toque(BAJAR, ID_APUNTAR, inicio.x as i32, inicio.y as i32, w as u16, h as u16);
-            nuevo = inicio + apunte.suave;
+            nuevo = inicio + objetivo;
         }
         ctl.toque(MOVER, ID_APUNTAR, nuevo.x as i32, nuevo.y as i32, w as u16, h as u16);
         apunte.actual = nuevo;
