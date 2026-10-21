@@ -89,6 +89,17 @@ pub struct Raton {
     pub limite_arr: f32,
     #[serde(rename = "panLimitBottom", default = "limite")]
     pub limite_aba: f32,
+    /// Suavizado por milisegundo (como SwagPlayer): fracción del camino que avanza el dedo en cada ms.
+    #[serde(rename = "smoothAlphaMin", default, skip_serializing_if = "Option::is_none")]
+    pub suave_min: Option<f32>,
+    #[serde(rename = "smoothAlphaMax", default, skip_serializing_if = "Option::is_none")]
+    pub suave_max: Option<f32>,
+    #[serde(rename = "smoothSpeedThresh", default, skip_serializing_if = "Option::is_none")]
+    pub suave_umbral: Option<f32>,
+    #[serde(rename = "adsSmoothAlphaMin", default, skip_serializing_if = "Option::is_none")]
+    pub ads_suave_min: Option<f32>,
+    #[serde(rename = "adsSmoothAlphaMax", default, skip_serializing_if = "Option::is_none")]
+    pub ads_suave_max: Option<f32>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -124,6 +135,11 @@ impl Raton {
             limite_der: 350.0,
             limite_arr: 350.0,
             limite_aba: 350.0,
+            suave_min: Some(0.04),
+            suave_max: Some(0.55),
+            suave_umbral: Some(12.0),
+            ads_suave_min: None,
+            ads_suave_max: None,
             extra,
         }
     }
@@ -413,9 +429,10 @@ const ID_NODO: u64 = 100;
 /// Cuánto mueve la cámara cada unidad de movimiento del mouse con sensibilidad 1.
 const FACTOR_RATON: f32 = 0.55;
 
+/// Dedo de la cámara. `objetivo` es adonde mandó el mouse; `actual`, por donde va el dedo.
 struct Apunte {
     actual: Vec2,
-    ultimo: Instant,
+    objetivo: Vec2,
 }
 
 /// Toque programado (doble toque, varios toques, deslizar).
@@ -439,6 +456,8 @@ pub struct Motor {
     apunte: Option<Apunte>,
     /// Posición del dedo en el botón de disparo mientras el clic izquierdo está presionado.
     disparo: Option<Vec2>,
+    /// La puntería avanza sola cada milisegundo (hilo de raton.rs) con suavizado.
+    suavizado_directo: bool,
     activos: HashMap<u64, (i32, i32)>,
     pendientes: Vec<Pendiente>,
     /// Canal de control y tamaño de pantalla, para el hilo que lee el mouse directo.
@@ -457,6 +476,7 @@ impl Motor {
             dpad: None,
             apunte: None,
             disparo: None,
+            suavizado_directo: false,
             activos: HashMap::new(),
             pendientes: Vec::new(),
             salida: None,
@@ -467,11 +487,35 @@ impl Motor {
         self.salida = ctl.map(|c| (c, w, h));
     }
 
-    /// Movimiento leído directo del mouse (hilo de raton.rs).
+    /// Movimiento leído directo del mouse (hilo de raton.rs). El dedo lo avanza `paso_directo`.
     pub fn mover_directo(&mut self, delta: Vec2) {
         if let Some((c, w, h)) = self.salida.clone() {
+            self.suavizado_directo = true;
             self.mover(delta, &c, w, h);
         }
+    }
+
+    /// Un paso de 1 ms del dedo de la cámara hacia donde mandó el mouse (hilo de raton.rs).
+    /// Igual que SwagPlayer: se manda la posición cada milisegundo aunque no cambie.
+    pub fn paso_directo(&mut self) {
+        let Some((c, w, h)) = self.salida.clone() else { return };
+        let Some(r) = self.mapa.as_ref().and_then(|m| m.raton.as_ref()) else { return };
+        let (min, max) = if self.ads {
+            (r.ads_suave_min.or(r.suave_min), r.ads_suave_max.or(r.suave_max))
+        } else {
+            (r.suave_min, r.suave_max)
+        };
+        let umbral = r.suave_umbral.unwrap_or(12.0).max(0.1);
+        let Some(a) = self.apunte.as_mut() else { return };
+        let falta = a.objetivo - a.actual;
+        let alfa = match (min, max) {
+            (Some(min), Some(max)) => (min + (max - min) * (falta.length() / umbral).clamp(0.0, 1.0)).clamp(0.005, 1.0),
+            _ => 1.0,
+        };
+        a.actual = if falta.length() < 0.05 { a.objetivo } else { a.actual + falta * alfa };
+        let (x, y) = (a.actual.x.round() as i32, a.actual.y.round() as i32);
+        c.toque(MOVER, ID_APUNTAR, x, y, w as u16, h as u16);
+        self.activos.insert(ID_APUNTAR, (x, y));
     }
 
     /// Clic leído directo del mouse (hilo de raton.rs).
@@ -621,11 +665,12 @@ impl Motor {
         if boton == PointerButton::Primary && self.cursor_bloqueado() {
             let disparo = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).filter(|r| r.disparo_con_clic).and_then(|r| r.disparo);
             if let Some(p) = disparo {
+                if presionado && self.disparo.is_some() {
+                    return true;
+                }
                 if presionado {
-                    // Un solo dedo a la vez: el de la cámara se suelta y el mouse arrastra el de disparo.
-                    if let Some(a) = self.apunte.take() {
-                        self.tocar(ctl, SOLTAR, ID_APUNTAR, a.actual.x as i32, a.actual.y as i32, w, h);
-                    }
+                    // Como SwagPlayer: el dedo de disparo se queda quieto y la cámara sigue moviéndose
+                    // (subir el mouse mientras disparas levanta la mira).
                     let pos = Vec2::new(p.x * w, p.y * h);
                     self.tocar(ctl, BAJAR, ID_DISPARO, pos.x as i32, pos.y as i32, w, h);
                     self.disparo = Some(pos);
@@ -638,55 +683,35 @@ impl Motor {
         self.tecla(nombre, presionado, false, ctl, w, h)
     }
 
-    /// Movimiento crudo del mouse en modo puntería: arrastra un dedo desde `startPos` y lo
-    /// vuelve a poner en el centro cuando llega al límite. Mientras se dispara, arrastra el dedo
-    /// del botón de disparo (así se "levanta la mira" en Free Fire).
+    /// Movimiento del mouse en modo puntería. Como SwagPlayer, el dedo de la cámara nunca se
+    /// levanta ni se recentra: puede salirse de la pantalla y Android lo sigue aceptando. Así el
+    /// juego no pierde el arrastre (levantarlo causaba tirones y la mira se quedaba pegada al disparar).
     pub fn mover(&mut self, delta: Vec2, ctl: &Control, w: f32, h: f32) {
         let Some(r) = self.mapa.as_ref().and_then(|m| m.raton.clone()) else { return };
         if !self.cursor_bloqueado() {
             return;
         }
         let escala = FACTOR_RATON * w / 1280.0 * if self.ads { r.mult_ads } else { 1.0 };
-        let objetivo = Vec2::new(delta.x * r.sens * r.vel_x, delta.y * r.sens * r.ratio_y * r.vel_y) * escala;
+        let d = Vec2::new(delta.x * r.sens * r.vel_x, delta.y * r.sens * r.ratio_y * r.vel_y) * escala;
         let inicio = Vec2::new(r.inicio.x * w, r.inicio.y * h);
-
-        if let Some(pos) = self.disparo {
-            // Sin recentrar: levantar el dedo cortaría los disparos. Solo se detiene en la orilla.
-            let nuevo = Vec2::new((pos.x + objetivo.x).clamp(1.0, w - 2.0), (pos.y + objetivo.y).clamp(1.0, h - 2.0));
-            self.tocar(ctl, MOVER, ID_DISPARO, nuevo.x as i32, nuevo.y as i32, w, h);
-            self.disparo = Some(nuevo);
-            return;
-        }
-
-        let mut apunte = self.apunte.take().unwrap_or_else(|| {
+        let apunte = self.apunte.get_or_insert_with(|| {
             ctl.toque(BAJAR, ID_APUNTAR, inicio.x as i32, inicio.y as i32, w as u16, h as u16);
-            Apunte { actual: inicio, ultimo: Instant::now() }
+            Apunte { actual: inicio, objetivo: inicio }
         });
-        // Sin suavizado: cada movimiento llega tal cual para que no haya retraso.
-        let mut nuevo = apunte.actual + objetivo;
-        // Cada recentrado levanta el dedo y el juego pierde ese movimiento (se siente como un tirón),
-        // así que el dedo recorre al menos el 30% de la pantalla antes de volver al centro.
-        let k = w / 1920.0;
-        let (lim_x, lim_y) = (0.3 * w, 0.3 * h);
-        let margen = 0.02 * w;
-        let fuera = nuevo.x < inicio.x - (r.limite_izq * k).max(lim_x)
-            || nuevo.x > inicio.x + (r.limite_der * k).max(lim_x)
-            || nuevo.y < inicio.y - (r.limite_arr * k).max(lim_y)
-            || nuevo.y > inicio.y + (r.limite_aba * k).max(lim_y)
-            || nuevo.x <= margen
-            || nuevo.y <= margen
-            || nuevo.x >= w - margen
-            || nuevo.y >= h - margen;
-        if fuera {
+        apunte.objetivo += d;
+        // Solo por seguridad tras mucho rato: recentrar si el dedo se fue demasiado lejos.
+        if apunte.objetivo.x.abs() > 30000.0 || apunte.objetivo.y.abs() > 30000.0 {
             ctl.toque(SOLTAR, ID_APUNTAR, apunte.actual.x as i32, apunte.actual.y as i32, w as u16, h as u16);
             ctl.toque(BAJAR, ID_APUNTAR, inicio.x as i32, inicio.y as i32, w as u16, h as u16);
-            nuevo = inicio + objetivo;
+            *apunte = Apunte { actual: inicio, objetivo: inicio };
         }
-        ctl.toque(MOVER, ID_APUNTAR, nuevo.x as i32, nuevo.y as i32, w as u16, h as u16);
-        apunte.actual = nuevo;
-        apunte.ultimo = Instant::now();
-        self.activos.insert(ID_APUNTAR, (nuevo.x as i32, nuevo.y as i32));
-        self.apunte = Some(apunte);
+        if !self.suavizado_directo {
+            // Sin el hilo del mouse: el dedo va directo adonde mandó el mouse.
+            apunte.actual = apunte.objetivo;
+            let (x, y) = (apunte.actual.x as i32, apunte.actual.y as i32);
+            ctl.toque(MOVER, ID_APUNTAR, x, y, w as u16, h as u16);
+        }
+        self.activos.insert(ID_APUNTAR, (apunte.actual.x as i32, apunte.actual.y as i32));
     }
 
     /// Temporizadores: toques programados y soltar el dedo de la cámara si el mouse se quedó quieto.
@@ -697,15 +722,11 @@ impl Motor {
         for p in listos {
             self.tocar(ctl, p.accion, p.dedo, p.x, p.y, w, h);
         }
-        let espera = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).map(|r| r.espera_ms).unwrap_or(2500);
-        if self.apunte.as_ref().is_some_and(|a| a.ultimo.elapsed() > Duration::from_millis(espera)) {
-            self.soltar_apunte(ctl, w, h);
-        }
     }
 
     /// Hay algo pendiente que necesita que la interfaz siga refrescando.
     pub fn ocupado(&self) -> bool {
-        !self.pendientes.is_empty() || self.apunte.is_some()
+        !self.pendientes.is_empty()
     }
 
     fn programar(&mut self, cuando: Instant, accion: u8, dedo: u64, x: i32, y: i32) {

@@ -21,8 +21,8 @@ const EV_REL: u16 = 2;
 const REL_X: u16 = 0;
 const REL_Y: u16 = 1;
 const TAM_EVENTO: usize = 24; // struct input_event en 64 bits
-/// Cada cuánto se manda el movimiento acumulado (4 ms = 250 veces por segundo).
-const PAQUETE: Duration = Duration::from_millis(4);
+/// Cada cuánto avanza y se manda el dedo de la cámara (1 ms, como SwagPlayer).
+const PASO: Duration = Duration::from_millis(1);
 
 /// `activo`: la ventana lo prende mientras la puntería está activa con el cursor bloqueado.
 /// `listo`: el hilo lo prende si pudo abrir algún mouse (si no, la ventana usa sus propios eventos).
@@ -41,29 +41,10 @@ pub fn iniciar(motor: Arc<Mutex<Motor>>, activo: Arc<AtomicBool>, listo: Arc<Ato
             let mut pendiente = vec![Vec2::ZERO; ratones.len()];
             let mut botones: Vec<Vec<(PointerButton, bool)>> = vec![Vec::new(); ratones.len()];
             let mut buf = [0u8; TAM_EVENTO * 64];
-            // Movimiento acumulado: se manda cada PAQUETE para no saturar a Android.
-            let mut acumulado = Vec2::ZERO;
-            let mut ultimo_envio = Instant::now();
-            let enviar = |acumulado: &mut Vec2, clics: Vec<(PointerButton, bool)>, ultimo: &mut Instant| {
-                let delta = std::mem::take(acumulado);
-                if !activo.load(Ordering::Relaxed) {
-                    return;
-                }
-                let mut m = motor.lock().unwrap();
-                if delta != Vec2::ZERO {
-                    m.mover_directo(delta);
-                }
-                for (b, presionado) in clics {
-                    m.boton_directo(b, presionado);
-                }
-                *ultimo = Instant::now();
-            };
+            let mut ultimo_paso = Instant::now();
             while Instant::now() < revisar {
-                let espera = if acumulado != Vec2::ZERO {
-                    PAQUETE.saturating_sub(ultimo_envio.elapsed()).as_millis().max(1) as u16
-                } else {
-                    200
-                };
+                let apuntando = activo.load(Ordering::Relaxed);
+                let espera = if apuntando { 1u16 } else { 200 };
                 let listos: Vec<bool> = {
                     let mut fds: Vec<PollFd> = ratones.iter().map(|f| PollFd::new(f.as_fd(), PollFlags::POLLIN)).collect();
                     if poll(&mut fds, PollTimeout::from(espera)).is_err() {
@@ -83,26 +64,32 @@ pub fn iniciar(motor: Arc<Mutex<Motor>>, activo: Arc<AtomicBool>, listo: Arc<Ato
                         match (tipo, codigo) {
                             (EV_REL, REL_X) => pendiente[i].x += valor as f32,
                             (EV_REL, REL_Y) => pendiente[i].y += valor as f32,
-                            (EV_KEY, c) => {
+                            // 1 = presionar, 0 = soltar; 2 es una repetición y se ignora.
+                            (EV_KEY, c) if valor != 2 => {
                                 if let Some(b) = boton(c) {
-                                    botones[i].push((b, valor != 0));
+                                    botones[i].push((b, valor == 1));
                                 }
                             }
                             (EV_SYN, _) => {
+                                let delta = std::mem::take(&mut pendiente[i]);
                                 let clics = std::mem::take(&mut botones[i]);
-                                if !clics.is_empty() {
-                                    // Lo que se movió antes del clic va primero; luego el clic,
-                                    // así el movimiento siguiente ya arrastra el botón de disparo.
-                                    enviar(&mut acumulado, clics, &mut ultimo_envio);
+                                if apuntando && (delta != Vec2::ZERO || !clics.is_empty()) {
+                                    let mut m = motor.lock().unwrap();
+                                    if delta != Vec2::ZERO {
+                                        m.mover_directo(delta);
+                                    }
+                                    for (b, presionado) in clics {
+                                        m.boton_directo(b, presionado);
+                                    }
                                 }
-                                acumulado += std::mem::take(&mut pendiente[i]);
                             }
                             _ => {}
                         }
                     }
                 }
-                if acumulado != Vec2::ZERO && ultimo_envio.elapsed() >= PAQUETE {
-                    enviar(&mut acumulado, Vec::new(), &mut ultimo_envio);
+                if apuntando && ultimo_paso.elapsed() >= PASO {
+                    motor.lock().unwrap().paso_directo();
+                    ultimo_paso = Instant::now();
                 }
             }
             ratones.clear();

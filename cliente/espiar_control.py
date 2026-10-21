@@ -1,5 +1,6 @@
 #!/usr/bin/python3
-"""Anota los mensajes que SwagPlayer manda a Android por control.sock (toques, teclas, scroll).
+"""Anota los mensajes que SwagPlayer manda a Android por control.sock (toques, teclas, scroll)
+y, con los mismos tiempos, el movimiento crudo del mouse (para comparar mouse -> toques).
 
 Se pone en medio: aparta el socket real del servidor y escucha en su lugar, reenviando todo.
 Uso: córrelo ANTES de abrir SwagPlayer; deja de escuchar al cerrar SwagPlayer o con Ctrl+C.
@@ -31,6 +32,49 @@ def esperar_socket():
         except FileNotFoundError:
             pass
         time.sleep(0.01)
+
+
+def ratones():
+    """Dispositivos que se mueven en X e Y (mouse y touchpads), sin los virtuales."""
+    rutas = []
+    for bloque in open('/proc/bus/input/devices').read().split('\n\n'):
+        lineas = bloque.splitlines()
+        nombre = next((l[9:] for l in lineas if l.startswith('N: Name=')), '')
+        rel = next((l[7:] for l in lineas if l.startswith('B: REL=')), None)
+        manej = next((l[12:] for l in lineas if l.startswith('H: Handlers=')), '')
+        evento = next((h for h in manej.split() if h.startswith('event')), None)
+        if rel and evento and 'swag' not in nombre.lower() and int(rel.split()[-1], 16) & 3 == 3:
+            rutas.append(f'/dev/input/{evento}')
+    return rutas
+
+
+def anotar_raton(log, t0):
+    """Anota cada reporte del mouse: movimiento (dx, dy) y botones."""
+    import select
+    fds = []
+    for ruta in ratones():
+        try:
+            fds.append(os.open(ruta, os.O_RDONLY | os.O_NONBLOCK))
+        except OSError:
+            pass
+    tam = struct.calcsize('llHHi')
+    acum = {fd: [0, 0] for fd in fds}
+    while fds:
+        listos, _, _ = select.select(fds, [], [], 1.0)
+        for fd in listos:
+            try:
+                datos = os.read(fd, tam * 64)
+            except OSError:
+                continue
+            for i in range(0, len(datos), tam):
+                _, _, tipo, codigo, valor = struct.unpack_from('llHHi', datos, i)
+                if tipo == 2 and codigo in (0, 1):
+                    acum[fd][codigo] += valor
+                elif tipo == 1 and 0x110 <= codigo <= 0x116:
+                    log.write(f'{time.time() - t0:9.3f}  raton  botón {codigo:#x} {"bajar" if valor else "soltar"}\n')
+                elif tipo == 0 and acum[fd] != [0, 0]:
+                    log.write(f'{time.time() - t0:9.3f}  raton  dx={acum[fd][0]:4} dy={acum[fd][1]:4}\n')
+                    acum[fd] = [0, 0]
 
 
 def decodificar(buf, log, t0):
@@ -93,6 +137,7 @@ def main():
         t0 = time.time()
         buf = b''
         with open(ruta_log, 'w', buffering=1) as log:
+            threading.Thread(target=anotar_raton, args=(log, t0), daemon=True).start()
             while (d := cliente.recv(65536)):
                 servidor.sendall(d)
                 buf = decodificar(buf + d, log, t0)
