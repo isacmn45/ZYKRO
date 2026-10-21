@@ -1,0 +1,250 @@
+{
+  "height": 1080,
+  "keyMapNodes": [
+    {
+      "centerPos": {
+        "x": 0.16898125,
+        "y": 0.7514333333333334
+      },
+      "comment": "Dpad — WASD movement/driving",
+      "downKey": "S",
+      "downOffset": 0.0357,
+      "leftKey": "A",
+      "leftOffset": 0.0357,
+      "rightKey": "D",
+      "rightOffset": 0.0357,
+      "type": "KMT_STEER_WHEEL",
+      "upKey": "W",
+      "upOffset": 0.0357
+    },
+    {
+      "comment": "Change weapon 1",
+      "key": "R",
+      "pos": {
+        "x": 0.9440823197364808,
+        "y": 0.07880512624979019
+      },
+      "switchMap": false,
+      "type": "KMT_CLICK"
+    },
+    {
+      "comment": "Change weapon 2",
+      "key": "Key_Shift",
+      "pos": {
+        "x": 0.17169858515262604,
+        "y": 0.42660683393478394
+      },
+      "switchMap": false,
+      "type": "KMT_CLICK"
+    },
+    {
+      "comment": "Change weapon 3",
+      "key": "Key_Space",
+      "pos": {
+        "x": 0.9547706842422484,
+        "y": 0.7037795186042786
+      },
+      "switchMap": false,
+      "type": "KMT_CLICK"
+    },
+    {
+      "comment": "Reload",
+      "key": "C",
+      "pos": {
+        "x": 0.9563261270523072,
+        "y": 0.903366208076477
+      },
+      "switchMap": false,
+      "type": "KMT_CLICK"
+    },
+    {
+      "comment": "Sprint",
+      "key": "5",
+      "pos": {
+        "x": 0.6768485307693481,
+        "y": 0.9152321815490724
+      },
+      "switchMap": false,
+      "type": "KMT_CLICK"
+    },
+    {
+      "comment": "Jump",
+      "key": "V",
+      "pos": {
+        "x": 0.5445079207420349,
+        "y": 0.611303985118866
+      },
+      "switchMap": false,
+      "type": "KMT_CLICK"
+    },
+    {
+      "comment": "Crouch",
+      "key": "E",
+      "pos": {
+        "x": 0.7867721319198608,
+        "y": 0.9006152749061584
+      },
+      "switchMap": false,
+      "type": "KMT_CLICK"
+    },
+    {
+      "comment": "Healing",
+      "key": "V",
+      "pos": {
+        "x": 0.31549394130706787,
+        "y": 0.9388729929924011
+      },
+      "switchMap": false,
+      "type": "KMT_CLICK"
+    },
+    {
+      "comment": "Revive",
+      "key": "1",
+      "pos": {
+        "x": 0.9169532060623168,
+        "y": 0.129261776804924
+      },
+      "switchMap": false,
+      "type": "KMT_CLICK"
+    },
+    {
+      "comment": "Interact",
+      "key": "2",
+      "pos": {
+        "x": 0.9514757394790648,
+        "y": 0.13036994636058807
+      },
+      "switchMap": false,
+      "type": "KMT_CLICK"
+    },
+    {
+      "comment": "Interact 2",
+      "key": "3",
+      "pos": {
+        "x": 0.9816192984580994,
+        "y": 0.13000516593456268
+      },
+      "switchMap": false,
+      "type": "KMT_CLICK"
+    },
+    {
+      "comment": "Misc (Grenade/Trap/Skill)",
+      "key": "RightButton",
+      "pos": {
+        "x": 0.9540236592292786,
+        "y": 0.5289228558540344
+      },
+      "switchMap": false,
+      "type": "KMT_CLICK"
+    },
+    {
+      "key": "Z",
+      "pos": {
+        "x": 0.8679900765419006,
+        "y": 0.8995364308357239
+      },
+      "type": "KMT_CLICK"
+    },
+    {
+      "key": "Key_Tab",
+      "pos": {
+        "x": 0.059965092688798904,
+        "y": 0.9033872485160828
+      },
+      "type": "KMT_CLICK"
+    },
+    {
+      "key": "4",
+      "pos": {
+        "x": 0.22952336072921753,
+        "y": 0.9036458134651184
+      },
+      "type": "KMT_CLICK"
+    },
+    {
+      "key": "F",
+      "pos": {
+        "x": 0.6129072308540344,
+        "y": 0.4609190225601196
+      },
+      "type": "KMT_CLICK"
+    },
+    {
+      "key": "G",
+      "pos": {
+        "x": 0.8975518345832825,
+        "y": 0.23939402401447296
+      },
+      "type": "KMT_CLICK"
+    },
+    {
+      "key": "H",
+      "pos": {
+        "x": 0.833228588104248,
+        "y": 0.23982343077659607
+      },
+      "type": "KMT_CLICK"
+    },
+    {
+      "key": "X",
+      "pos": {
+        "x": 0.739037036895752,
+        "y": 0.7582095861434937
+      },
+      "type": "KMT_CLICK"
+    },
+    {
+      "key": "XButton1",
+      "pos": {
+        "x": 0.598619818687439,
+        "y": 0.7457751631736755
+      },
+      "type": "KMT_CLICK"
+    }
+  ],
+  "mouseMoveMap": {
+    "activationTimeMs": 40,
+    "adsEnabled": true,
+    "adsKey": "RightButton",
+    "adsSensMultiplier": 0.4,
+    "adsSmoothAlphaMax": 0.25,
+    "adsSmoothAlphaMin": 0.025,
+    "adsVelocityMinFactor": 0.12,
+    "comment": "Pan control — Precision Aim Engine (Free Fire optimized)",
+    "mouseAcceleration": false,
+    "noiseEpsilon": 0.35,
+    "panLimitBottom": 350,
+    "panLimitLeft": 350,
+    "panLimitRight": 350,
+    "panLimitTop": 350,
+    "sensitivityRatioY": 1.149999976158142,
+    "sensitivityX": 1.350000023841858,
+    "shootOnClick": true,
+    "shootPos": {
+      "x": 0.8289979100227356,
+      "y": 0.6954305768013
+    },
+    "smoothAlphaMax": 0.55,
+    "smoothAlphaMin": 0.04,
+    "smoothSpeedThresh": 12,
+    "speedRatioX": 1,
+    "speedRatioY": 1,
+    "startPos": {
+      "x": 0.79366534948349,
+      "y": 0.4899415969848633
+    },
+    "suspendKey": "Key_Control",
+    "touchIdleTimeoutMs": 2500,
+    "tweaks": 16450,
+    "type": "KMT_MOUSE_MOVE",
+    "useRawInput": true,
+    "velocityCurveK": 0.07,
+    "velocityMinFactor": 0.25
+  },
+  "overlaySettings": {
+    "enabled": true,
+    "opacity": 0.699999988079071
+  },
+  "switchKey": "Key_QuoteLeft",
+  "width": 1920
+}

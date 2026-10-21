@@ -1,0 +1,4 @@
+*.so
+/teclado-fisico
+houdini/libhoudini*
+__pycache__/

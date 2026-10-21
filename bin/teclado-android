@@ -1,0 +1,27 @@
+#!/bin/sh
+# Muestra u oculta el teclado en pantalla de Android en SwagPlayer.
+#   teclado-android ocultar   -> Android cree que hay teclado físico y no muestra el de pantalla
+#   teclado-android mostrar   -> vuelve el teclado en pantalla
+#   teclado-android           -> alterna entre los dos
+C=redroid-redroid-1
+BIN="$HOME/.local/lib/swagplayer/teclado-fisico"
+
+activo() { docker exec "$C" pidof teclado-fisico >/dev/null 2>&1; }
+
+ocultar() {
+    activo && return 0
+    docker cp "$BIN" "$C":/data/local/tmp/teclado-fisico >/dev/null &&
+    docker exec "$C" chmod 755 /data/local/tmp/teclado-fisico &&
+    docker exec -d "$C" /data/local/tmp/teclado-fisico
+    # Por si alguien activó "mostrar teclado virtual con teclado físico".
+    docker exec "$C" settings put secure show_ime_with_hard_keyboard 0
+}
+
+mostrar() { docker exec "$C" pkill teclado-fisico 2>/dev/null; true; }
+
+case "$1" in
+    ocultar) ocultar ;;
+    mostrar) mostrar ;;
+    "") if activo; then mostrar; echo "Teclado en pantalla: visible"; else ocultar; echo "Teclado en pantalla: oculto"; fi ;;
+    *) echo "uso: teclado-android [ocultar|mostrar]"; exit 2 ;;
+esac

@@ -1,0 +1,32 @@
+#!/usr/bin/python3
+import os
+import signal
+import subprocess
+import time
+from pathlib import Path
+
+def matches(pid):
+    try:
+        return os.stat(f'/proc/{pid}').st_uid == os.getuid() and os.readlink(f'/proc/{pid}/exe') == '/usr/lib/swagplayer/SwagPlayer'
+    except OSError:
+        return False
+
+pids = [int(p.name) for p in Path('/proc').iterdir() if p.name.isdigit() and matches(p.name)]
+for pid in pids:
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+for _ in range(30):
+    if not any(matches(pid) for pid in pids):
+        break
+    time.sleep(0.1)
+for pid in pids:
+    if matches(pid):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+subprocess.run(['docker', 'stop', '-t', '5', 'redroid-redroid-1'],
+               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
