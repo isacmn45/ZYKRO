@@ -592,8 +592,11 @@ impl Editor {
                 self.boton_tecla(ui, "Activar", &cambio, Objetivo::Cambio);
                 self.boton_tecla(ui, "Pausar", &pausa, Objetivo::Pausa);
                 if let Some(r) = &mut self.mapa.raton {
-                    deslizador(ui, "Sensibilidad", &mut r.sens, 0.1..=5.0);
-                    deslizador(ui, "Vertical", &mut r.ratio_y, 0.3..=2.0);
+                    // En el archivo, vertical = sensitivityX × sensitivityRatioY; aquí se muestran por separado.
+                    let mut vertical = r.sens * r.ratio_y;
+                    deslizador(ui, "Horizontal", &mut r.sens, 0.1..=5.0);
+                    deslizador(ui, "Vertical", &mut vertical, 0.1..=8.0);
+                    r.ratio_y = vertical / r.sens.max(0.01);
                     ui.checkbox(&mut r.disparo_con_clic, "Disparar con clic izquierdo");
                     if r.disparo_con_clic && r.disparo.is_none() {
                         r.disparo = Some(Punto::nuevo(r.inicio.x + 0.05, r.inicio.y + 0.2));
