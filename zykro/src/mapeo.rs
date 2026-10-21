@@ -447,6 +447,8 @@ pub struct Motor {
     presionadas: HashMap<String, bool>,
     dpad: Option<(i32, i32)>,
     apunte: Option<Apunte>,
+    /// Posición del dedo en el botón de disparo mientras el clic izquierdo está presionado.
+    disparo: Option<Vec2>,
     activos: HashMap<u64, (i32, i32)>,
     pendientes: Vec<Pendiente>,
 }
@@ -462,6 +464,7 @@ impl Motor {
             presionadas: HashMap::new(),
             dpad: None,
             apunte: None,
+            disparo: None,
             activos: HashMap::new(),
             pendientes: Vec::new(),
         }
@@ -501,6 +504,7 @@ impl Motor {
         self.presionadas.clear();
         self.dpad = None;
         self.apunte = None;
+        self.disparo = None;
         self.pendientes.clear();
         self.pausa = false;
         self.ads = false;
@@ -606,8 +610,17 @@ impl Motor {
         if boton == PointerButton::Primary && self.cursor_bloqueado() {
             let disparo = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).filter(|r| r.disparo_con_clic).and_then(|r| r.disparo);
             if let Some(p) = disparo {
-                let (x, y) = ((p.x * w) as i32, (p.y * h) as i32);
-                self.tocar(ctl, if presionado { BAJAR } else { SOLTAR }, ID_DISPARO, x, y, w, h);
+                if presionado {
+                    // Un solo dedo a la vez: el de la cámara se suelta y el mouse arrastra el de disparo.
+                    if let Some(a) = self.apunte.take() {
+                        self.tocar(ctl, SOLTAR, ID_APUNTAR, a.actual.x as i32, a.actual.y as i32, w, h);
+                    }
+                    let pos = Vec2::new(p.x * w, p.y * h);
+                    self.tocar(ctl, BAJAR, ID_DISPARO, pos.x as i32, pos.y as i32, w, h);
+                    self.disparo = Some(pos);
+                } else if let Some(pos) = self.disparo.take() {
+                    self.tocar(ctl, SOLTAR, ID_DISPARO, pos.x as i32, pos.y as i32, w, h);
+                }
                 return true;
             }
         }
@@ -615,7 +628,8 @@ impl Motor {
     }
 
     /// Movimiento crudo del mouse en modo puntería: arrastra un dedo desde `startPos` y lo
-    /// vuelve a poner en el centro cuando llega al límite.
+    /// vuelve a poner en el centro cuando llega al límite. Mientras se dispara, arrastra el dedo
+    /// del botón de disparo (así se "levanta la mira" en Free Fire).
     pub fn mover(&mut self, delta: Vec2, ctl: &Control, w: f32, h: f32) {
         let Some(r) = self.mapa.as_ref().and_then(|m| m.raton.clone()) else { return };
         if !self.cursor_bloqueado() {
@@ -624,6 +638,14 @@ impl Motor {
         let escala = FACTOR_RATON * w / 1280.0 * if self.ads { r.mult_ads } else { 1.0 };
         let objetivo = Vec2::new(delta.x * r.sens * r.vel_x, delta.y * r.sens * r.ratio_y * r.vel_y) * escala;
         let inicio = Vec2::new(r.inicio.x * w, r.inicio.y * h);
+
+        if let Some(pos) = self.disparo {
+            // Sin recentrar: levantar el dedo cortaría los disparos. Solo se detiene en la orilla.
+            let nuevo = Vec2::new((pos.x + objetivo.x).clamp(1.0, w - 2.0), (pos.y + objetivo.y).clamp(1.0, h - 2.0));
+            self.tocar(ctl, MOVER, ID_DISPARO, nuevo.x as i32, nuevo.y as i32, w, h);
+            self.disparo = Some(nuevo);
+            return;
+        }
 
         let mut apunte = self.apunte.take().unwrap_or_else(|| {
             ctl.toque(BAJAR, ID_APUNTAR, inicio.x as i32, inicio.y as i32, w as u16, h as u16);
@@ -694,8 +716,8 @@ impl Motor {
         if let Some(a) = self.apunte.take() {
             self.tocar(ctl, SOLTAR, ID_APUNTAR, a.actual.x as i32, a.actual.y as i32, w, h);
         }
-        if let Some((x, y)) = self.activos.get(&ID_DISPARO).copied() {
-            self.tocar(ctl, SOLTAR, ID_DISPARO, x, y, w, h);
+        if let Some(pos) = self.disparo.take() {
+            self.tocar(ctl, SOLTAR, ID_DISPARO, pos.x as i32, pos.y as i32, w, h);
         }
     }
 
