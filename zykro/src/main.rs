@@ -4,6 +4,7 @@
 mod ajustes;
 mod android;
 mod carga;
+mod cierre;
 mod config;
 mod control;
 mod curva;
@@ -84,6 +85,10 @@ struct Zykro {
     editor: editor::Editor,
     /// Menú rápido del botón de controles (sensibilidad), como el de BlueStacks.
     menu: menu::Menu,
+    /// Se está mostrando la confirmación para cerrar ZYKRO.
+    confirmar_cierre: bool,
+    /// El usuario ya confirmó: el próximo pedido de cierre se deja pasar.
+    cierre_confirmado: bool,
     /// El mapeo está convirtiendo teclas en toques en este momento.
     mapeo_activo: bool,
     cursor_bloqueado: bool,
@@ -128,6 +133,8 @@ impl Zykro {
             raton_listo,
             editor: editor::Editor::new(),
             menu: menu::Menu::default(),
+            confirmar_cierre: false,
+            cierre_confirmado: false,
             mapeo_activo: false,
             cursor_bloqueado: false,
             apuntando_antes: false,
@@ -225,6 +232,7 @@ impl Zykro {
             && !self.editor.abierto
             && !self.ajustes.abierto
             && !self.menu.abierto()
+            && !self.confirmar_cierre
             && enfocada;
         if self.mapeo_activo && !activo {
             if let Some(c) = &control {
@@ -541,7 +549,7 @@ impl Zykro {
 
             if self.editor.abierto {
                 self.teclas_editor(ctx);
-            } else if !en_borde && !self.ajustes.abierto && !self.menu.abierto() {
+            } else if !en_borde && !self.ajustes.abierto && !self.menu.abierto() && !self.confirmar_cierre {
                 self.entrada(ctx, rect, ancho, alto);
             }
             // Fuera de `entrada` también: que el dedo del scroll nunca se quede abajo.
@@ -691,6 +699,22 @@ impl eframe::App for Zykro {
             menu::Salida::Editor => {
                 self.cerrar_menu();
                 self.abrir_editor();
+            }
+        }
+        // Cerrar la ventana (X, Alt+F4, barra de tareas) primero pide confirmación.
+        if ctx.input(|i| i.viewport().close_requested()) && !self.cierre_confirmado {
+            ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+            self.confirmar_cierre = true;
+        }
+        if self.confirmar_cierre {
+            match cierre::mostrar(ctx, self.config().apagar_al_cerrar) {
+                Some(cierre::Respuesta::Cerrar) => {
+                    self.confirmar_cierre = false;
+                    self.cierre_confirmado = true;
+                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                }
+                Some(cierre::Respuesta::Cancelar) => self.confirmar_cierre = false,
+                None => {}
             }
         }
         if let Some(nueva) = self.ajustes.mostrar(ctx) {
