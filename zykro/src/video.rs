@@ -1,7 +1,7 @@
 //! Video sin comprimir desde `video.sock`: el servidor comparte los buffers de pantalla de Android
 //! (DMA-BUF) y avisa cuál mostrar. Formato en docs/investigacion.md.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{self, IoSliceMut, Read};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -17,14 +17,23 @@ const SYNC_READ: u64 = 1;
 const SYNC_START: u64 = 0;
 const SYNC_END: u64 = 4;
 
-/// Último cuadro recibido, listo para subir a la GPU.
+/// Cuadro recibido, listo para subir a la GPU.
 pub struct Cuadro {
     pub ancho: usize,
     pub alto: usize,
     pub rgba: Vec<u8>,
 }
 
-pub type Compartido = Arc<Mutex<Option<Cuadro>>>;
+/// Cuadros recibidos que la ventana todavía no mostró, del más viejo al más nuevo.
+///
+/// Android (60 Hz) y el monitor (60.02 Hz aquí) no van sincronizados y los cuadros llegan con
+/// irregularidad. Cuando su desfase cae justo donde la ventana toma el cuadro (unos 20 s de cada
+/// ~47), llegan dos dentro del mismo refresco y luego ninguno. Guardando solo el último se perdía
+/// uno de cada par: hasta 20 por segundo. Con la cola, el segundo se muestra en el refresco siguiente.
+pub type Compartido = Arc<Mutex<VecDeque<Cuadro>>>;
+
+/// Cuadros como máximo en la cola: si se acumulan más, se tiran los viejos para no sumar retraso.
+const MAX_COLA: usize = 2;
 
 struct Buffer {
     _archivo: File,
@@ -118,7 +127,12 @@ pub fn recibir_cuadros(socket: UnixStream, destino: Compartido, mut nuevo: impl 
                         px.swap(0, 2);
                     }
                 }
-                *destino.lock().unwrap() = Some(Cuadro { ancho: b.ancho, alto: b.alto, rgba });
+                let mut cola = destino.lock().unwrap();
+                cola.push_back(Cuadro { ancho: b.ancho, alto: b.alto, rgba });
+                while cola.len() > MAX_COLA {
+                    cola.pop_front();
+                }
+                drop(cola);
                 nuevo();
             }
             _ => {}

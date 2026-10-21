@@ -32,6 +32,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const ALTO_TITULO: f32 = 30.0;
 const ANCHO_LATERAL: f32 = 34.0;
+/// Refrescos seguidos con un cuadro de retraso antes de saltar uno (medio segundo a 60 Hz).
+const MAX_ATRASADOS: u32 = 30;
 const BORDE: f32 = 5.0; // zona en la orilla para cambiar el tamaño
 
 const FONDO_OSCURO: Color32 = Color32::from_rgb(0x12, 0x13, 0x22);
@@ -63,6 +65,8 @@ struct Zykro {
     textura: Option<egui::TextureHandle>,
     /// Último cuadro mostrado (para las capturas de pantalla).
     cuadro: Option<video::Cuadro>,
+    /// Refrescos seguidos mostrando el cuadro con uno de retraso (ver `actualizar_textura`).
+    atrasados: u32,
     lateral: bool,
     tocando: Option<Pos2>,
     fps: u32,
@@ -95,7 +99,7 @@ impl Zykro {
             config: config::Config::cargar(),
             ..Default::default()
         }));
-        let video: video::Compartido = Arc::new(Mutex::new(None));
+        let video: video::Compartido = Arc::default();
         android::iniciar(cc.egui_ctx.clone(), estado.clone(), video.clone());
         android::vigilar_texto(cc.egui_ctx.clone(), estado.clone());
         let motor = Arc::new(Mutex::new(mapeo::Motor::new()));
@@ -107,6 +111,7 @@ impl Zykro {
             video,
             textura: None,
             cuadro: None,
+            atrasados: 0,
             lateral: true,
             tocando: None,
             fps: 0,
@@ -316,7 +321,21 @@ impl Zykro {
 
     /// Sube a la GPU el cuadro nuevo, si llegó uno.
     fn actualizar_textura(&mut self, ctx: &egui::Context) {
-        let Some(cuadro) = self.video.lock().unwrap().take() else { return };
+        // Un cuadro por refresco, en orden; si queda otro en la cola, se muestra en el siguiente.
+        // Si eso dura medio segundo (cada cuadro sale un refresco tarde, ~17 ms), se salta uno para
+        // no arrastrar ese retraso.
+        let (cuadro, quedan) = {
+            let mut cola = self.video.lock().unwrap();
+            if cola.len() > 1 && self.atrasados >= MAX_ATRASADOS {
+                cola.pop_front();
+            }
+            (cola.pop_front(), !cola.is_empty())
+        };
+        self.atrasados = if quedan { (self.atrasados + 1).min(MAX_ATRASADOS) } else { 0 };
+        let Some(cuadro) = cuadro else { return };
+        if quedan {
+            ctx.request_repaint();
+        }
         let imagen = egui::ColorImage::from_rgba_unmultiplied([cuadro.ancho, cuadro.alto], &cuadro.rgba);
         match &mut self.textura {
             Some(t) => t.set(imagen, TextureOptions::LINEAR),
