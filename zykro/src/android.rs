@@ -134,9 +134,18 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
     let ruta_video = format!("{SOCKETS}/video.sock");
     let ruta_control = format!("{SOCKETS}/control.sock");
     let inicio = Instant::now();
-    while !(Path::new(&ruta_video).exists() && Path::new(&ruta_control).exists()) {
+    let mut socket_video = loop {
         if estado.lock().unwrap().reinicio.is_some() {
             return Err(std::io::Error::other("reinicio pedido"));
+        }
+        if Path::new(&ruta_video).exists() && Path::new(&ruta_control).exists() {
+            match UnixStream::connect(&ruta_video) {
+                Ok(socket) => break socket,
+                // Mientras Android arranca quedan los sockets de la sesión anterior, sin nadie
+                // escuchando: se sigue esperando a que el servidor los vuelva a crear.
+                Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {}
+                Err(e) => return Err(e),
+            }
         }
         if inicio.elapsed() > Duration::from_secs(20) {
             // El servidor borra video.sock cuando otro cliente se conecta.
@@ -144,7 +153,7 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
             ctx.request_repaint();
         }
         thread::sleep(Duration::from_millis(300));
-    }
+    };
 
     mensaje(estado, Etapa::Conectar, "Conectando…");
     ctx.request_repaint();
@@ -152,7 +161,6 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
         let s = estado.lock().unwrap();
         (s.config.android.clone(), s.config.ocultar_teclado)
     };
-    let mut socket_video = UnixStream::connect(&ruta_video)?;
     let control = Control::conectar(&ruta_control, android.lod_activado, android.lod)?;
 
     // El servidor no manda nada hasta que la pantalla cambia: apagar y prender la pantalla la redibuja.
