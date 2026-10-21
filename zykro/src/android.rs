@@ -27,6 +27,8 @@ pub struct Estado {
     pub config: Config,
     /// Configuración de Android pendiente de aplicar (se aplica recreando el contenedor).
     pub reinicio: Option<config::Android>,
+    /// El juego tiene abierto su cuadro de texto (chat): el mapeo se apaga para poder escribir.
+    pub escribiendo: bool,
 }
 
 pub type EstadoCompartido = Arc<Mutex<Estado>>;
@@ -161,6 +163,60 @@ fn ocultar_teclado_en_pantalla() {
             let _ = Command::new(script).arg("ocultar").stdout(Stdio::null()).stderr(Stdio::null()).spawn();
         }
     }
+}
+
+/// Vigila los cambios de foco de Android para saber cuándo un juego abre su cuadro de texto
+/// (en Unity es una ventana aparte que pide el teclado siempre visible).
+pub fn vigilar_texto(ctx: egui::Context, estado: EstadoCompartido) {
+    use std::io::{BufRead, BufReader};
+    thread::Builder::new()
+        .name("zykro-texto".into())
+        .spawn(move || loop {
+            let hijo = Command::new("docker")
+                .args(["exec", CONTENEDOR, "logcat", "-b", "events", "-s", "input_focus", "-T", "1"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn();
+            if let Ok(mut hijo) = hijo {
+                let mut cuadro: Option<String> = None;
+                for linea in BufReader::new(hijo.stdout.take().unwrap()).lines().skip(1).map_while(Result::ok) {
+                    let Some(resto) = linea.split("Focus ").nth(1) else { continue };
+                    let mut partes = resto.split_whitespace();
+                    let (Some(accion), Some(ventana)) = (partes.next(), partes.next()) else { continue };
+                    let nuevo = match accion {
+                        "entering" if es_cuadro_texto(ventana) => Some(ventana.to_string()),
+                        "entering" => None,
+                        "leaving" if cuadro.as_deref() == Some(ventana) => None,
+                        _ => continue,
+                    };
+                    if nuevo.is_some() != cuadro.is_some() {
+                        estado.lock().unwrap().escribiendo = nuevo.is_some();
+                        ctx.request_repaint();
+                    }
+                    cuadro = nuevo;
+                }
+                let _ = hijo.wait();
+            }
+            estado.lock().unwrap().escribiendo = false;
+            thread::sleep(Duration::from_secs(2));
+        })
+        .expect("no se pudo crear el hilo de texto");
+}
+
+fn es_cuadro_texto(ventana: &str) -> bool {
+    let Ok(salida) = Command::new("docker").args(["exec", CONTENEDOR, "dumpsys", "window", "windows"]).output() else {
+        return false;
+    };
+    let texto = String::from_utf8_lossy(&salida.stdout);
+    let Some(resto) = texto.split(&format!("Window{{{ventana} ")).nth(1) else { return false };
+    let bloque: String = resto.chars().take(3000).collect();
+    !bloque.contains("BASE_APPLICATION") && bloque.contains("always_visible")
+}
+
+/// Paquete de la app en primer plano, según swag-rust-server.
+pub fn app_activa() -> Option<String> {
+    let texto = std::fs::read_to_string(format!("{SOCKETS}/active_app")).ok()?;
+    texto.lines().find_map(|l| l.strip_prefix("package=").or_else(|| l.strip_prefix("Package=")).map(|p| p.trim().to_string()))
 }
 
 /// Configuración de Android con la que está creado el contenedor.

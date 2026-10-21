@@ -5,6 +5,8 @@ mod ajustes;
 mod android;
 mod config;
 mod control;
+mod editor;
+mod mapeo;
 mod video;
 
 use std::path::PathBuf;
@@ -63,6 +65,14 @@ struct Zykro {
     cuadros_seg: u32,
     inicio_seg: Instant,
     ajustes: ajustes::Ajustes,
+    motor: mapeo::Motor,
+    editor: editor::Editor,
+    /// El mapeo está convirtiendo teclas en toques en este momento.
+    mapeo_activo: bool,
+    cursor_bloqueado: bool,
+    apuntando_antes: bool,
+    mods_previos: egui::Modifiers,
+    revision_app: Instant,
 }
 
 impl Zykro {
@@ -78,6 +88,7 @@ impl Zykro {
         }));
         let video: video::Compartido = Arc::new(Mutex::new(None));
         android::iniciar(cc.egui_ctx.clone(), estado.clone(), video.clone());
+        android::vigilar_texto(cc.egui_ctx.clone(), estado.clone());
         Zykro {
             estado,
             video,
@@ -89,6 +100,13 @@ impl Zykro {
             cuadros_seg: 0,
             inicio_seg: Instant::now(),
             ajustes: ajustes::Ajustes::new(),
+            motor: mapeo::Motor::new(),
+            editor: editor::Editor::new(),
+            mapeo_activo: false,
+            cursor_bloqueado: false,
+            apuntando_antes: false,
+            mods_previos: egui::Modifiers::NONE,
+            revision_app: Instant::now() - Duration::from_secs(5),
         }
     }
 
@@ -108,6 +126,115 @@ impl Zykro {
             android::pedir_reinicio(&self.estado, nueva.android);
         } else {
             android::avisar(&self.estado, "Configuración guardada");
+        }
+    }
+
+    fn dimensiones(&self) -> (f32, f32) {
+        let (w, h) = self.estado.lock().unwrap().pantalla.unwrap_or((1280, 720));
+        (w as f32, h as f32)
+    }
+
+    fn abrir_editor(&mut self) {
+        if self.editor.abierto {
+            self.editor.abierto = false;
+            return;
+        }
+        self.editor.abrir(&self.motor.paquete, self.motor.mapa.clone());
+    }
+
+    /// Decide si el mapeo está activo, bloquea el cursor en modo puntería y corre los temporizadores.
+    fn actualizar_mapeo(&mut self, ctx: &egui::Context) {
+        let (w, h) = self.dimensiones();
+        let control = self.control();
+        if self.revision_app.elapsed() > Duration::from_secs(1) {
+            if let Some(app) = android::app_activa() {
+                self.motor.cambiar_app(&app, control.as_ref(), w, h);
+            }
+            self.revision_app = Instant::now();
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
+        let escribiendo = self.estado.lock().unwrap().escribiendo;
+        let enfocada = ctx.input(|i| i.focused);
+        let activo = self.motor.mapa.is_some() && !escribiendo && !self.editor.abierto && !self.ajustes.abierto && enfocada;
+        if self.mapeo_activo && !activo {
+            if let Some(c) = &control {
+                self.motor.soltar_todo(c, w, h);
+            }
+        }
+        self.mapeo_activo = activo;
+
+        let bloquear = activo && self.motor.cursor_bloqueado();
+        if bloquear != self.cursor_bloqueado {
+            let modo = if bloquear { egui::CursorGrab::Locked } else { egui::CursorGrab::None };
+            ctx.send_viewport_cmd(ViewportCommand::CursorGrab(modo));
+            ctx.send_viewport_cmd(ViewportCommand::CursorVisible(!bloquear));
+            self.cursor_bloqueado = bloquear;
+        }
+        if self.motor.apuntando != self.apuntando_antes {
+            self.apuntando_antes = self.motor.apuntando;
+            let tecla = self.motor.mapa.as_ref().map(|m| mapeo::etiqueta(&m.cambio)).unwrap_or_default();
+            let texto = if self.motor.apuntando {
+                format!("Puntería activada · {tecla} para soltar el cursor")
+            } else {
+                format!("Cursor libre · {tecla} para apuntar")
+            };
+            android::avisar(&self.estado, texto);
+        }
+        if activo {
+            if let Some(c) = &control {
+                self.motor.tick(c, w, h);
+            }
+            if self.motor.ocupado() {
+                ctx.request_repaint_after(Duration::from_millis(8));
+            }
+        }
+    }
+
+    fn panel_editor(&mut self, raiz: &mut egui::Ui) {
+        let salida = egui::Panel::right("editor")
+            .exact_size(272.0)
+            .resizable(false)
+            .frame(egui::Frame::new().fill(FONDO))
+            .show_separator_line(false)
+            .show(raiz, |ui| self.editor.panel(ui))
+            .inner;
+        if let editor::Salida::Guardar(mapa) = salida {
+            if self.motor.paquete.is_empty() {
+                android::avisar(&self.estado, "Abre un juego antes de guardar sus controles");
+            } else if mapa.guardar(&self.motor.paquete).is_ok() {
+                self.motor.mapa = Some(mapa);
+                android::avisar(&self.estado, "Controles guardados");
+            } else {
+                android::avisar(&self.estado, "No se pudieron guardar los controles");
+            }
+        }
+    }
+
+    /// Con el editor abierto, las teclas se asignan a los controles en vez de ir a Android.
+    fn teclas_editor(&mut self, ctx: &egui::Context) {
+        let (eventos, mods) = ctx.input(|i| (i.events.clone(), i.modifiers));
+        for (antes, ahora, nombre) in [
+            (self.mods_previos.shift, mods.shift, "Key_Shift"),
+            (self.mods_previos.ctrl, mods.ctrl, "Key_Control"),
+            (self.mods_previos.alt, mods.alt, "Key_Alt"),
+        ] {
+            if ahora && !antes && self.editor.esperando_tecla() {
+                self.editor.tecla(nombre);
+            }
+        }
+        self.mods_previos = mods;
+        for evento in eventos {
+            match evento {
+                Event::Key { key, pressed: true, repeat: false, .. } => {
+                    if let Some(nombre) = mapeo::nombre_tecla(key) {
+                        self.editor.tecla(&nombre);
+                    }
+                }
+                Event::PointerButton { button, pressed: true, .. } if button != PointerButton::Primary && self.editor.esperando_tecla() => {
+                    self.editor.tecla(mapeo::nombre_boton(button));
+                }
+                _ => {}
+            }
         }
     }
 
@@ -207,7 +334,9 @@ impl Zykro {
                         if icono(ui, ic::LIST, "Configuración", t, FONDO_HOVER).clicked() {
                             self.abrir_ajustes();
                         }
-                        icono(ui, ic::GAME_CONTROLLER, "Mapeo de teclas (próximamente)", t, FONDO_HOVER);
+                        if icono(ui, ic::GAME_CONTROLLER, "Controles del juego", t, FONDO_HOVER).clicked() {
+                            self.abrir_editor();
+                        }
                     });
                 });
             });
@@ -229,7 +358,9 @@ impl Zykro {
                     if icono(ui, ic::GEAR, "Configuración", t, FONDO_HOVER).clicked() {
                         self.abrir_ajustes();
                     }
-                    icono(ui, ic::KEYBOARD, "Mapeo de teclas (próximamente)", t, FONDO_HOVER);
+                    if icono(ui, ic::KEYBOARD, "Controles del juego", t, FONDO_HOVER).clicked() {
+                        self.abrir_editor();
+                    }
                     if icono(ui, ic::SPEAKER_HIGH, "Subir volumen", t, FONDO_HOVER).clicked() {
                         self.pulsar(24);
                     }
@@ -285,6 +416,21 @@ impl Zykro {
                 let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
                 ui.painter().image(t.id(), rect, uv, Color32::WHITE);
             }
+            let escribiendo = self.estado.lock().unwrap().escribiendo;
+            if self.editor.abierto {
+                self.editor.pantalla(ui, rect);
+            } else if let Some(mapa) = &self.motor.mapa {
+                if mapa.overlay.enabled && !escribiendo {
+                    editor::dibujar(&ui.painter_at(rect), rect, mapa, mapa.overlay.opacity, None, false);
+                }
+            }
+            if escribiendo && self.motor.mapa.is_some() {
+                let texto = format!("{}  Escribiendo · controles en pausa", ic::KEYBOARD);
+                let galeria = ui.painter().layout_no_wrap(texto, FontId::proportional(13.0), TEXTO);
+                let caja = Rect::from_center_size(rect.center_top() + Vec2::new(0.0, 22.0), galeria.size() + Vec2::new(22.0, 12.0));
+                ui.painter().rect_filled(caja, 12.0, FONDO.gamma_multiply(0.92));
+                ui.painter().galley(caja.center() - galeria.size() / 2.0, galeria, TEXTO);
+            }
             if self.textura.is_none() || !mensaje.is_empty() {
                 if self.textura.is_some() {
                     ui.painter().rect_filled(area, 0.0, Color32::from_black_alpha(170));
@@ -301,7 +447,9 @@ impl Zykro {
                 ctx.request_repaint_after(Duration::from_millis(200));
             }
 
-            if !en_borde && !self.ajustes.abierto {
+            if self.editor.abierto {
+                self.teclas_editor(ctx);
+            } else if !en_borde && !self.ajustes.abierto {
                 self.entrada(ctx, rect, ancho, alto);
             }
         });
@@ -316,9 +464,29 @@ impl Zykro {
             let y = ((p.y - rect.min.y) / rect.height() * alto).clamp(0.0, alto - 1.0);
             (x as i32, y as i32)
         };
-        let (eventos, puntero) = ctx.input(|i| (i.events.clone(), i.pointer.hover_pos()));
+        let (eventos, puntero, mods) = ctx.input(|i| (i.events.clone(), i.pointer.hover_pos(), i.modifiers));
+        let (activo, bloqueado) = (self.mapeo_activo, self.cursor_bloqueado);
+        // egui no avisa de Shift/Ctrl/Alt solos: se detectan comparando con el cuadro anterior.
+        for (antes, ahora, nombre) in [
+            (self.mods_previos.shift, mods.shift, "Key_Shift"),
+            (self.mods_previos.ctrl, mods.ctrl, "Key_Control"),
+            (self.mods_previos.alt, mods.alt, "Key_Alt"),
+        ] {
+            if activo && antes != ahora {
+                self.motor.tecla(nombre, ahora, false, &control, ancho, alto);
+            }
+        }
+        self.mods_previos = mods;
         for evento in eventos {
             match evento {
+                Event::MouseMoved(delta) if activo && bloqueado => {
+                    self.motor.mover(delta, &control, ancho, alto);
+                }
+                Event::PointerButton { pos, button, pressed, .. } if activo && (bloqueado || button != PointerButton::Primary) => {
+                    if bloqueado || !pressed || rect.contains(pos) {
+                        self.motor.boton(button, pressed, &control, ancho, alto);
+                    }
+                }
                 Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, .. } if rect.contains(pos) => {
                     let (x, y) = a_android(pos);
                     control.toque(BAJAR, 0, x, y, w, h);
@@ -340,7 +508,7 @@ impl Zykro {
                         control.toque(SOLTAR, 0, x, y, w, h);
                     }
                 }
-                Event::MouseWheel { unit, delta, .. } => {
+                Event::MouseWheel { unit, delta, .. } if !bloqueado => {
                     let Some(pos) = puntero.filter(|p| rect.contains(*p)) else { continue };
                     let factor = match unit {
                         MouseWheelUnit::Line => 1.0,
@@ -350,12 +518,19 @@ impl Zykro {
                     let (x, y) = a_android(pos);
                     control.scroll(x, y, w, h, delta.x * factor, delta.y * factor);
                 }
-                Event::Key { key, pressed, modifiers, .. } => {
+                Event::Key { key, pressed, repeat, modifiers, .. } => {
                     if key == egui::Key::F11 {
                         if pressed {
                             alternar_pantalla_completa(ctx);
                         }
                         continue;
+                    }
+                    if activo {
+                        if let Some(nombre) = mapeo::nombre_tecla(key) {
+                            if self.motor.tecla(&nombre, pressed, repeat, &control, ancho, alto) {
+                                continue;
+                            }
+                        }
                     }
                     let Some(codigo) = android::tecla_android(key) else { continue };
                     let mut meta = 0;
@@ -391,9 +566,12 @@ impl eframe::App for Zykro {
 
         let pantalla_completa = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
         let en_borde = cambiar_tamano(ctx);
+        self.actualizar_mapeo(ctx);
         if !pantalla_completa {
             self.barra_titulo(ui, en_borde);
-            if self.lateral {
+            if self.editor.abierto {
+                self.panel_editor(ui);
+            } else if self.lateral {
                 self.barra_lateral(ui);
             }
         }
