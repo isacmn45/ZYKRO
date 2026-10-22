@@ -35,6 +35,10 @@ const RESOLUCIONES: [(u32, u32, &str); 6] = [
 ];
 const DPIS: [(u32, &str); 4] = [(160, "160 (pequeño)"), (240, "240 (normal)"), (320, "320 (grande)"), (480, "480 (muy grande)")];
 const FPS: [u32; 4] = [30, 60, 90, 120];
+/// Tamaño fijo de la ventana de configuración (el contenido se desplaza si no cabe).
+const ANCHO_PESTANAS: f32 = 170.0;
+const ANCHO_CONTENIDO: f32 = 590.0;
+const ALTO_CONTENIDO: f32 = 470.0;
 
 pub struct Ajustes {
     pub abierto: bool,
@@ -70,8 +74,10 @@ impl Ajustes {
         let mut guardar = None;
         let mut cerrar = false;
         let marco = egui::Frame::new().fill(FONDO).corner_radius(8.0).stroke(Stroke::new(1.0, FONDO_HOVER));
+        // Todas las pestañas con el mismo tamaño; en una ventana baja se achica para que quepa.
+        let alto = (ctx.content_rect().height() - 150.0).clamp(240.0, ALTO_CONTENIDO);
         let respuesta = egui::Modal::new(egui::Id::new("ajustes")).frame(marco).show(ctx, |ui| {
-            ui.set_width(660.0);
+            ui.set_width(ANCHO_PESTANAS + ANCHO_CONTENIDO);
             ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
 
             // Cabecera
@@ -93,7 +99,7 @@ impl Ajustes {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 // Pestañas
                 ui.vertical(|ui| {
-                    ui.set_width(160.0);
+                    ui.set_width(ANCHO_PESTANAS);
                     ui.spacing_mut().item_spacing.y = 2.0;
                     for (p, glifo, nombre) in PESTANAS {
                         if pestana(ui, self.pestana == p, glifo, nombre).clicked() {
@@ -101,17 +107,19 @@ impl Ajustes {
                         }
                     }
                 });
-                // Contenido
+                // Contenido: siempre del mismo tamaño; si una pestaña no cabe, se desplaza.
                 ui.vertical(|ui| {
-                    ui.set_width(480.0);
-                    ui.set_min_height(300.0);
-                    ui.spacing_mut().item_spacing.y = 12.0;
-                    ui.add_space(6.0);
-                    egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 4)).show(ui, |ui| match self.pestana {
-                        Pestana::General => self.general(ui),
-                        Pestana::Pantalla => self.pantalla(ui),
-                        Pestana::Rendimiento => self.rendimiento(ui),
-                        Pestana::Acerca => acerca(ui),
+                    ui.set_width(ANCHO_CONTENIDO);
+                    ui.set_height(alto);
+                    egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(alto).show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 12.0;
+                        ui.add_space(6.0);
+                        egui::Frame::new().inner_margin(egui::Margin::symmetric(20, 4)).show(ui, |ui| match self.pestana {
+                            Pestana::General => self.general(ui),
+                            Pestana::Pantalla => self.pantalla(ui),
+                            Pestana::Rendimiento => self.rendimiento(ui),
+                            Pestana::Acerca => acerca(ui),
+                        });
                     });
                 });
             });
@@ -292,7 +300,7 @@ fn linea(ui: &mut egui::Ui) {
 }
 
 fn pestana(ui: &mut egui::Ui, elegida: bool, glifo: &str, nombre: &str) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(160.0, 38.0), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(ANCHO_PESTANAS, 38.0), Sense::click());
     if elegida || resp.hovered() {
         ui.painter().rect_filled(rect.shrink2(Vec2::new(8.0, 2.0)), 4.0, FONDO_HOVER);
     }
