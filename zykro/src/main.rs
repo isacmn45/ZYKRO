@@ -3,6 +3,7 @@
 
 mod ajustes;
 mod android;
+mod audio;
 mod carga;
 mod cierre;
 mod config;
@@ -129,6 +130,7 @@ impl Zykro {
         let video: video::Compartido = Arc::default();
         android::iniciar(cc.egui_ctx.clone(), estado.clone(), video.clone());
         android::vigilar_texto(cc.egui_ctx.clone(), estado.clone());
+        audio::iniciar();
         aplicar_modo(&estado, estado.lock().unwrap().config.modo, false);
         let motor = Arc::new(Mutex::new(mapeo::Motor::new()));
         let raton_directo = Arc::new(AtomicBool::new(false));
