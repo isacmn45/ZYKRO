@@ -157,7 +157,6 @@ impl Ajustes {
 
     fn general(&mut self, ui: &mut egui::Ui) {
         titulo(ui, "General");
-        ui.checkbox(&mut self.borrador.apagar_al_cerrar, "Apagar Android al cerrar ZYKRO");
         ui.checkbox(&mut self.borrador.mostrar_fps, "Mostrar FPS en la barra de título");
         ui.checkbox(&mut self.borrador.mostrar_temperatura, "Mostrar la temperatura de la CPU y la GPU en la barra de título");
         ui.checkbox(&mut self.borrador.ocultar_teclado, "Ocultar el teclado en pantalla de Android");

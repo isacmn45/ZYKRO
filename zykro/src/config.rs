@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub apagar_al_cerrar: bool,
     pub mostrar_fps: bool,
     pub mostrar_temperatura: bool,
     /// Modo de rendimiento (se aplica sin reiniciar Android).
@@ -32,7 +31,6 @@ pub struct Android {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            apagar_al_cerrar: true,
             mostrar_fps: true,
             mostrar_temperatura: true,
             modo: crate::rendimiento::Modo::default(),

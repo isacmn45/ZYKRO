@@ -11,8 +11,8 @@ pub enum Respuesta {
     Cancelar,
 }
 
-/// Dibuja el diálogo. `apaga_android`: la configuración apaga Android al cerrar (se avisa).
-pub fn mostrar(ctx: &egui::Context, apaga_android: bool) -> Option<Respuesta> {
+/// Dibuja el diálogo. Al cerrar ZYKRO también se apaga Android, y se avisa.
+pub fn mostrar(ctx: &egui::Context) -> Option<Respuesta> {
     let mut respuesta = None;
     let marco = egui::Frame::new()
         .fill(FONDO)
@@ -27,9 +27,7 @@ pub fn mostrar(ctx: &egui::Context, apaga_android: bool) -> Option<Respuesta> {
             ui.label(RichText::new("¿Cerrar ZYKRO?").size(15.5).strong().color(TEXTO));
         });
         ui.label(RichText::new("¿Seguro que quieres cerrar ZYKRO?").size(13.5).color(TEXTO));
-        if apaga_android {
-            ui.label(RichText::new("Android también se apagará.").size(12.5).color(TENUE));
-        }
+        ui.label(RichText::new("Android también se apagará.").size(12.5).color(TENUE));
         ui.add_space(6.0);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let cerrar = egui::Button::new(RichText::new("Cerrar").color(Color32::WHITE).strong())

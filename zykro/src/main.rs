@@ -213,6 +213,54 @@ impl Zykro {
         self.editor.abrir(&paquete, mapa);
     }
 
+    /// Texto de la temperatura (si está activada y hay sensores) y su color de aviso: ámbar desde
+    /// 80 °C y rojo desde 90 °C (`None` = color normal).
+    fn temperatura(&self) -> Option<(String, Option<Color32>)> {
+        if !self.config().mostrar_temperatura {
+            return None;
+        }
+        let t = *self.temperaturas.lock().unwrap();
+        let grados = |v: f32| format!("{v:.0} °C");
+        let texto = match (t.cpu, t.gpu) {
+            (Some(c), _) if t.gpu_en_cpu => format!("CPU/GPU {}", grados(c)),
+            (Some(c), Some(g)) => format!("CPU {}  ·  GPU {}", grados(c), grados(g)),
+            (Some(c), None) => format!("CPU {}", grados(c)),
+            (None, Some(g)) => format!("GPU {}", grados(g)),
+            (None, None) => return None,
+        };
+        let maxima = t.cpu.unwrap_or(0.0).max(t.gpu.unwrap_or(0.0));
+        let color = if maxima >= 90.0 { Some(CERRAR_HOVER) } else if maxima >= 80.0 { Some(AVISO) } else { None };
+        Some((texto, color))
+    }
+
+    /// En pantalla completa no hay barra de título: FPS y temperatura van en una cajita abajo a la
+    /// izquierda, como en BlueStacks.
+    fn indicadores(&self, ui: &egui::Ui, area: Rect) {
+        let mut partes: Vec<(String, Color32)> = Vec::new();
+        if self.config().mostrar_fps {
+            partes.push((format!("{} FPS", self.fps), TEXTO));
+        }
+        if let Some((texto, color)) = self.temperatura() {
+            partes.push((format!("{}  {texto}", ic::THERMOMETER_SIMPLE), color.unwrap_or(TEXTO)));
+        }
+        if partes.is_empty() {
+            return;
+        }
+        let mut trabajo = egui::text::LayoutJob::default();
+        for (i, (texto, color)) in partes.into_iter().enumerate() {
+            let separador = if i > 0 { "   ·   " } else { "" };
+            trabajo.append(separador, 0.0, egui::TextFormat { font_id: FontId::proportional(15.0), color: TENUE, ..Default::default() });
+            trabajo.append(&texto, 0.0, egui::TextFormat { font_id: FontId::proportional(15.0), color, ..Default::default() });
+        }
+        let galeria = ui.painter().layout_job(trabajo);
+        let margen = Vec2::new(14.0, 9.0);
+        let tam = galeria.size() + margen * 2.0;
+        let caja = Rect::from_min_size(Pos2::new(area.min.x + 16.0, area.max.y - 16.0 - tam.y), tam);
+        ui.painter().rect(caja, 8.0, FONDO_OSCURO.gamma_multiply(0.8), Stroke::new(1.0, FONDO_HOVER), egui::StrokeKind::Inside);
+        ui.painter().galley(caja.min + margen, galeria, TEXTO);
+        ui.ctx().request_repaint_after(Duration::from_secs(1));
+    }
+
     /// Ajusta el ancho de la ventana a la imagen de Android para que no queden bordes negros a los
     /// lados: con la barra lateral plegada la imagen ocupa todo el ancho, y desplegada se suma la
     /// barra. Maximizada o en pantalla completa no se puede cambiar el tamaño.
@@ -461,24 +509,10 @@ impl Zykro {
                         // Refrescar el contador aunque Android no esté dibujando.
                         ctx.request_repaint_after(Duration::from_secs(1));
                     }
-                    if self.config().mostrar_temperatura {
-                        let t = *self.temperaturas.lock().unwrap();
-                        let grados = |v: f32| format!("{v:.0} °C");
-                        let texto = match (t.cpu, t.gpu) {
-                            (Some(c), _) if t.gpu_en_cpu => format!("CPU/GPU {}", grados(c)),
-                            (Some(c), Some(g)) => format!("CPU {}  ·  GPU {}", grados(c), grados(g)),
-                            (Some(c), None) => format!("CPU {}", grados(c)),
-                            (None, Some(g)) => format!("GPU {}", grados(g)),
-                            (None, None) => String::new(),
-                        };
-                        if !texto.is_empty() {
-                            // Amarillo desde 80 °C y rojo desde 90 °C.
-                            let maxima = t.cpu.unwrap_or(0.0).max(t.gpu.unwrap_or(0.0));
-                            let color = if maxima >= 90.0 { CERRAR_HOVER } else if maxima >= 80.0 { AVISO } else { TENUE };
-                            ui.add_space(6.0);
-                            ui.label(RichText::new(format!("{}  {texto}", ic::THERMOMETER_SIMPLE)).color(color).size(11.0));
-                            ctx.request_repaint_after(Duration::from_secs(2));
-                        }
+                    if let Some((texto, color)) = self.temperatura() {
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(format!("{}  {texto}", ic::THERMOMETER_SIMPLE)).color(color.unwrap_or(TENUE)).size(11.0));
+                        ctx.request_repaint_after(Duration::from_secs(2));
                     }
 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -612,6 +646,9 @@ impl Zykro {
             if self.textura.is_none() || !carga.mensaje.is_empty() {
                 carga::dibujar(ui, area, &carga);
                 ctx.request_repaint_after(Duration::from_millis(16));
+            }
+            if ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) {
+                self.indicadores(ui, area);
             }
             if let Some(texto) = aviso {
                 let pos = area.right_bottom() - Vec2::new(12.0, 12.0);
@@ -783,7 +820,7 @@ impl eframe::App for Zykro {
             self.confirmar_cierre = true;
         }
         if self.confirmar_cierre {
-            match cierre::mostrar(ctx, self.config().apagar_al_cerrar) {
+            match cierre::mostrar(ctx) {
                 Some(cierre::Respuesta::Cerrar) => {
                     self.confirmar_cierre = false;
                     self.cierre_confirmado = true;
@@ -801,9 +838,7 @@ impl eframe::App for Zykro {
     fn on_exit(&mut self) {
         self.cerrar_menu();
         rendimiento::restaurar();
-        if self.config().apagar_al_cerrar {
-            android::apagar();
-        }
+        android::apagar();
     }
 }
 
