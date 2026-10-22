@@ -125,7 +125,7 @@ impl Ajustes {
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add_space(16.0);
-                    let boton = egui::Button::new(RichText::new("Guardar").color(FONDO).strong())
+                    let boton = egui::Button::new(RichText::new("Guardar").color(egui::Color32::WHITE).strong())
                         .fill(ACENTO)
                         .min_size(Vec2::new(96.0, 30.0));
                     if ui.add(boton).clicked() {

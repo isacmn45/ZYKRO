@@ -421,10 +421,10 @@ impl Editor {
         if let Some(Objetivo::Nodo(_) | Objetivo::Dpad(..) | Objetivo::Cambio) = self.esperando {
             let aviso = "Presiona una tecla o botón del mouse  ·  Esc para cancelar";
             let pos = rect.center_top() + Vec2::new(0.0, 28.0);
-            let galeria = painter.layout_no_wrap(aviso.into(), FontId::proportional(14.0), FONDO);
+            let galeria = painter.layout_no_wrap(aviso.into(), FontId::proportional(14.0), Color32::WHITE);
             let caja = Rect::from_center_size(pos, galeria.size() + Vec2::new(24.0, 14.0));
             painter.rect_filled(caja, 8.0, ACENTO);
-            painter.galley(caja.center() - galeria.size() / 2.0, galeria, FONDO);
+            painter.galley(caja.center() - galeria.size() / 2.0, galeria, Color32::WHITE);
         }
 
         // Control nuevo arrastrado desde el panel.
@@ -499,7 +499,7 @@ impl Editor {
                 if ui.add(egui::Button::new("Cancelar").min_size(Vec2::new(ancho, 32.0))).clicked() {
                     salida = Salida::Cerrar;
                 }
-                let guardar = egui::Button::new(RichText::new(format!("{}  Guardar", ic::FLOPPY_DISK)).color(FONDO).strong())
+                let guardar = egui::Button::new(RichText::new(format!("{}  Guardar", ic::FLOPPY_DISK)).color(Color32::WHITE).strong())
                     .fill(ACENTO)
                     .min_size(Vec2::new(ancho, 32.0));
                 if ui.add(guardar).clicked() {

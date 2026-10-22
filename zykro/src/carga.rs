@@ -8,7 +8,7 @@ use eframe::egui::{self, epaint::Vertex, text::LayoutJob, Align2, Color32, FontI
 use egui_phosphor::regular as ic;
 
 use crate::android::Etapa;
-use crate::{ACENTO, FONDO, FONDO_HOVER, FONDO_OSCURO, NOMBRE, TENUE, TEXTO, VERSION};
+use crate::{ACENTO, FONDO_HOVER, FONDO_OSCURO, NOMBRE, TENUE, TEXTO, VERSION};
 
 const ERROR: Color32 = Color32::from_rgb(0xff, 0x8a, 0x80);
 const PASOS: [(Etapa, &str); 3] = [(Etapa::Encender, "Encender"), (Etapa::Arrancar, "Arrancar Android"), (Etapa::Conectar, "Conectar")];
@@ -21,6 +21,8 @@ pub struct Vista {
     pub error: bool,
     /// Hay un cuadro de Android detrás (se perdió la conexión): se oscurece en vez de taparlo.
     pub sobre_video: bool,
+    /// Ícono de la app.
+    pub logo: egui::TextureId,
 }
 
 pub fn dibujar(ui: &egui::Ui, area: Rect, v: &Vista) {
@@ -40,13 +42,10 @@ pub fn dibujar(ui: &egui::Ui, area: Rect, v: &Vista) {
     let logo = c - Vec2::new(0.0, 78.0 * e);
     let pulso = 0.5 + 0.5 * (t * 1.6).sin();
     brillo(&p, logo, (150.0 + 20.0 * pulso) * e, ACENTO.gamma_multiply(0.10 + 0.05 * pulso));
-    p.circle_stroke(logo, 50.0 * e, Stroke::new(2.0 * e, FONDO_HOVER));
-    cometa(&p, logo, 50.0 * e, t * 3.2, 3.0 * e);
-    p.circle_filled(logo, 34.0 * e, ACENTO);
-    // La fuente no tiene negrita: se dibuja la Z tres veces corrida para engrosarla.
-    for dx in [-1.0, 0.0, 1.0] {
-        p.text(logo + Vec2::new(dx * e, 0.0), Align2::CENTER_CENTER, "Z", FontId::proportional(40.0 * e), FONDO);
-    }
+    p.circle_stroke(logo, 58.0 * e, Stroke::new(2.0 * e, FONDO_HOVER));
+    cometa(&p, logo, 58.0 * e, t * 3.2, 3.0 * e);
+    let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+    p.image(v.logo, Rect::from_center_size(logo, Vec2::splat(84.0 * e)), uv, Color32::WHITE);
 
     // Nombre con letras separadas y versión.
     let mut nombre = LayoutJob::default();
@@ -93,7 +92,7 @@ fn pasos(p: &Painter, centro: Pos2, e: f32, v: &Vista, t: f32) {
         let r = 9.0 * e;
         let color_texto = if i < actual {
             p.circle_filled(punto, r, ACENTO);
-            p.text(punto, Align2::CENTER_CENTER, ic::CHECK, FontId::proportional(11.0 * e), FONDO);
+            p.text(punto, Align2::CENTER_CENTER, ic::CHECK, FontId::proportional(11.0 * e), Color32::WHITE);
             TEXTO
         } else if i == actual {
             let color = if v.error { ERROR } else { ACENTO };

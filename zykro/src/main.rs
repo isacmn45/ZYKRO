@@ -42,15 +42,20 @@ const ANCHO_LATERAL: f32 = 34.0;
 const MAX_ATRASADOS: u32 = 30;
 const BORDE: f32 = 5.0; // zona en la orilla para cambiar el tamaño
 
-const FONDO_OSCURO: Color32 = Color32::from_rgb(0x12, 0x13, 0x22);
-const FONDO_CONTROL: Color32 = Color32::from_rgb(0x26, 0x28, 0x3e);
-const FONDO: Color32 = Color32::from_rgb(0x1a, 0x1b, 0x2d);
-const FONDO_HOVER: Color32 = Color32::from_rgb(0x2e, 0x30, 0x4a);
+// Paleta morada, a juego con el ícono (desktop/zykro.svg).
+const FONDO_OSCURO: Color32 = Color32::from_rgb(0x11, 0x0e, 0x1b);
+const FONDO_CONTROL: Color32 = Color32::from_rgb(0x28, 0x22, 0x39);
+const FONDO: Color32 = Color32::from_rgb(0x1b, 0x17, 0x29);
+const FONDO_HOVER: Color32 = Color32::from_rgb(0x34, 0x2c, 0x4b);
 const CERRAR_HOVER: Color32 = Color32::from_rgb(0xe0, 0x3e, 0x3e);
-const ICONO: Color32 = Color32::from_rgb(0xc4, 0xc6, 0xd4);
-const TENUE: Color32 = Color32::from_rgb(0x80, 0x83, 0x99);
-const TEXTO: Color32 = Color32::from_rgb(0xe8, 0xe9, 0xf2);
-const ACENTO: Color32 = Color32::from_rgb(0xf6, 0xc3, 0x1c);
+const ICONO: Color32 = Color32::from_rgb(0xcb, 0xc5, 0xdc);
+const TENUE: Color32 = Color32::from_rgb(0x8a, 0x84, 0xa3);
+const TEXTO: Color32 = Color32::from_rgb(0xee, 0xeb, 0xf6);
+const ACENTO: Color32 = Color32::from_rgb(0xa8, 0x55, 0xf7);
+/// Avisos que deben verse cálidos aunque la app sea morada (temperatura alta).
+const AVISO: Color32 = Color32::from_rgb(0xf5, 0x9e, 0x0b);
+/// Ícono de la app, generado desde desktop/zykro.svg con `rsvg-convert -w 256 -h 256`.
+const ICONO_PNG: &[u8] = include_bytes!("../assets/icono.png");
 
 fn main() -> eframe::Result {
     let opciones = eframe::NativeOptions {
@@ -59,13 +64,19 @@ fn main() -> eframe::Result {
             .with_app_id("zykro")
             .with_decorations(false)
             .with_inner_size([1280.0 + ANCHO_LATERAL, 720.0 + ALTO_TITULO])
-            .with_min_inner_size([480.0, 300.0]),
+            .with_min_inner_size([480.0, 300.0])
+            .with_icon({
+                let (rgba, width, height) = decodificar_png(ICONO_PNG);
+                egui::IconData { rgba, width, height }
+            }),
         ..Default::default()
     };
     eframe::run_native(NOMBRE, opciones, Box::new(|cc| Ok(Box::new(Zykro::new(cc)))))
 }
 
 struct Zykro {
+    /// Ícono de la app (barra de título y pantalla de carga).
+    logo: egui::TextureHandle,
     estado: android::EstadoCompartido,
     video: video::Compartido,
     textura: Option<egui::TextureHandle>,
@@ -123,7 +134,13 @@ impl Zykro {
         let raton_directo = Arc::new(AtomicBool::new(false));
         let raton_listo = Arc::new(AtomicBool::new(false));
         raton::iniciar(motor.clone(), raton_directo.clone(), raton_listo.clone());
+        let logo = {
+            let (rgba, w, h) = decodificar_png(ICONO_PNG);
+            let imagen = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+            cc.egui_ctx.load_texture("logo", imagen, TextureOptions::LINEAR)
+        };
         Zykro {
+            logo,
             estado,
             video,
             textura: None,
@@ -419,7 +436,7 @@ impl Zykro {
 
                 ui.horizontal_centered(|ui| {
                     ui.add_space(8.0);
-                    logo(ui);
+                    ui.add(egui::Image::new(&self.logo).fit_to_exact_size(Vec2::splat(20.0)));
                     ui.add_space(4.0);
                     ui.label(RichText::new(format!("{NOMBRE} {VERSION}")).color(TEXTO).size(12.5));
                     if self.config().mostrar_fps {
@@ -441,7 +458,7 @@ impl Zykro {
                         if !texto.is_empty() {
                             // Amarillo desde 80 °C y rojo desde 90 °C.
                             let maxima = t.cpu.unwrap_or(0.0).max(t.gpu.unwrap_or(0.0));
-                            let color = if maxima >= 90.0 { CERRAR_HOVER } else if maxima >= 80.0 { ACENTO } else { TENUE };
+                            let color = if maxima >= 90.0 { CERRAR_HOVER } else if maxima >= 80.0 { AVISO } else { TENUE };
                             ui.add_space(6.0);
                             ui.label(RichText::new(format!("{}  {texto}", ic::THERMOMETER_SIMPLE)).color(color).size(11.0));
                             ctx.request_repaint_after(Duration::from_secs(2));
@@ -552,6 +569,7 @@ impl Zykro {
                     mensaje: s.mensaje.clone(),
                     error: s.error,
                     sobre_video: self.textura.is_some(),
+                    logo: self.logo.id(),
                 };
                 (w as f32, h as f32, carga, aviso)
             };
@@ -832,10 +850,13 @@ fn boton_nav(ui: &mut egui::Ui, forma: Nav, tam: Vec2) -> egui::Response {
 }
 
 /// Logo propio: círculo amarillo con una "Z".
-fn logo(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
-    ui.painter().circle_filled(rect.center(), 8.0, ACENTO);
-    ui.painter().text(rect.center(), Align2::CENTER_CENTER, "Z", FontId::proportional(11.5), FONDO);
+/// PNG RGBA de 8 bits (el ícono) a píxeles RGBA.
+fn decodificar_png(datos: &[u8]) -> (Vec<u8>, u32, u32) {
+    let mut lector = png::Decoder::new(std::io::Cursor::new(datos)).read_info().expect("ícono PNG inválido");
+    let mut rgba = vec![0; lector.output_buffer_size().expect("ícono PNG demasiado grande")];
+    let info = lector.next_frame(&mut rgba).expect("ícono PNG inválido");
+    rgba.truncate(info.buffer_size());
+    (rgba, info.width, info.height)
 }
 
 /// Aplica un modo de rendimiento en segundo plano. `avisar_ok`: avisar también si salió bien.
