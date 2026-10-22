@@ -129,7 +129,7 @@ impl Ajustes {
                 ui.set_height(44.0);
                 ui.add_space(16.0);
                 if self.borrador.android != self.original.android {
-                    ui.label(RichText::new(format!("{}  Al guardar se reiniciará Android", ic::ARROWS_CLOCKWISE)).size(12.5).color(ACENTO));
+                    ui.label(RichText::new(format!("{}  Al guardar se reiniciarán ZYKRO y Android", ic::ARROWS_CLOCKWISE)).size(12.5).color(ACENTO));
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.add_space(16.0);
@@ -196,7 +196,7 @@ impl Ajustes {
                 }
             });
         });
-        nota(ui, "Se aplica reiniciando Android. Tus apps y datos no se borran.");
+        nota(ui, "Se aplica reiniciando ZYKRO y Android. Tus apps y datos no se borran.");
     }
 
     fn rendimiento(&mut self, ui: &mut egui::Ui) {

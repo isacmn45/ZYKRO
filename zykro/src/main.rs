@@ -62,6 +62,8 @@ const TEXTO: Color32 = Color32::from_rgb(0xee, 0xeb, 0xf6);
 const ACENTO: Color32 = Color32::from_rgb(0xa8, 0x55, 0xf7);
 /// Avisos que deben verse cálidos aunque la app sea morada (temperatura alta).
 const AVISO: Color32 = Color32::from_rgb(0xf5, 0x9e, 0x0b);
+/// Argumento con el que ZYKRO se vuelve a abrir para recrear Android con la configuración guardada.
+const APLICAR_ANDROID: &str = "--aplicar-android";
 /// Ícono de la app, generado desde desktop/zykro.svg con `rsvg-convert -w 256 -h 256`.
 const ICONO_PNG: &[u8] = include_bytes!("../assets/icono.png");
 
@@ -115,6 +117,8 @@ struct Zykro {
     confirmar_cierre: bool,
     /// El usuario ya confirmó: el próximo pedido de cierre se deja pasar.
     cierre_confirmado: bool,
+    /// Al cerrar, volver a abrir ZYKRO para aplicar la configuración de Android.
+    reabrir: bool,
     /// El mapeo está convirtiendo teclas en toques en este momento.
     mapeo_activo: bool,
     cursor_bloqueado: bool,
@@ -169,8 +173,12 @@ impl Zykro {
         cc.egui_ctx.set_fonts(fuentes);
         cc.egui_ctx.set_visuals(visuales());
 
+        // Reabierto tras cambiar la configuración de Android: lo primero es recrearlo con ella.
+        let aplicar = std::env::args().any(|a| a == APLICAR_ANDROID);
+        let config = config::Config::cargar(aplicar);
         let estado: android::EstadoCompartido = Arc::new(Mutex::new(android::Estado {
-            config: config::Config::cargar(),
+            reinicio: aplicar.then(|| config.android.clone()),
+            config,
             ..Default::default()
         }));
         let video: video::Compartido = Arc::default();
@@ -210,6 +218,7 @@ impl Zykro {
             temperaturas: sensores::iniciar(),
             confirmar_cierre: false,
             cierre_confirmado: false,
+            reabrir: false,
             mapeo_activo: false,
             cursor_bloqueado: false,
             apuntando_antes: false,
@@ -228,14 +237,19 @@ impl Zykro {
         self.ajustes.abrir(&actual);
     }
 
-    fn aplicar_config(&mut self, nueva: config::Config) {
+    fn aplicar_config(&mut self, ctx: &egui::Context, nueva: config::Config) {
         nueva.guardar();
         let anterior = std::mem::replace(&mut self.estado.lock().unwrap().config, nueva.clone());
-        if nueva.modo != anterior.modo {
-            aplicar_modo(&self.estado, nueva.modo, nueva.android == anterior.android);
-        }
         if nueva.android != anterior.android {
-            android::pedir_reinicio(&self.estado, nueva.android);
+            // ZYKRO se cierra y se vuelve a abrir, y la ventana nueva recrea Android: así la
+            // pantalla de carga sale limpia y no sobre el último cuadro del juego.
+            self.reabrir = true;
+            self.cierre_confirmado = true;
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+            return;
+        }
+        if nueva.modo != anterior.modo {
+            aplicar_modo(&self.estado, nueva.modo, true);
         } else {
             android::avisar(&self.estado, "Configuración guardada");
         }
@@ -1019,14 +1033,19 @@ impl eframe::App for Zykro {
             }
         }
         if let Some(nueva) = self.ajustes.mostrar(ctx) {
-            self.aplicar_config(nueva);
+            self.aplicar_config(ctx, nueva);
         }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.cerrar_menu();
         rendimiento::restaurar();
-        android::apagar();
+        if self.reabrir {
+            // La ventana nueva apaga Android antes de recrearlo.
+            reabrir();
+        } else {
+            android::apagar();
+        }
     }
 }
 
@@ -1143,6 +1162,17 @@ fn cambiar_tamano(ctx: &egui::Context) -> (bool, Option<(ResizeDirection, Cursor
     ctx.set_cursor_icon(cursor);
     let tomada = ctx.input(|i| i.pointer.primary_pressed()).then_some((dir, cursor));
     (true, tomada)
+}
+
+/// Abre otra vez ZYKRO para que recree Android con la configuración guardada.
+fn reabrir() {
+    use std::os::unix::process::CommandExt;
+    // Si ZYKRO se reinstaló mientras corría, el ejecutable viejo figura como «(deleted)».
+    let exe = std::env::current_exe().map(|e| PathBuf::from(e.to_string_lossy().trim_end_matches(" (deleted)")));
+    let exe = exe.unwrap_or_else(|_| PathBuf::from("zykro"));
+    if let Err(e) = Command::new(&exe).arg(APLICAR_ANDROID).process_group(0).spawn() {
+        eprintln!("[zykro] no se pudo volver a abrir {}: {e}", exe.display());
+    }
 }
 
 fn carpeta_capturas() -> PathBuf {

@@ -54,11 +54,15 @@ fn ruta() -> PathBuf {
 }
 
 impl Config {
-    pub fn cargar() -> Config {
+    /// Lee la configuración guardada. Lo de Android sale del contenedor (es con lo que está
+    /// creado), salvo con `android_guardado`: ZYKRO se reinició para aplicar lo guardado.
+    pub fn cargar(android_guardado: bool) -> Config {
         let mut config: Config =
             std::fs::read(ruta()).ok().and_then(|d| serde_json::from_slice(&d).ok()).unwrap_or_default();
-        if let Some(actual) = crate::android::leer_config_android() {
-            config.android = actual;
+        if !android_guardado {
+            if let Some(actual) = crate::android::leer_config_android() {
+                config.android = actual;
+            }
         }
         config
     }

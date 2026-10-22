@@ -40,7 +40,8 @@ pub struct Estado {
     pub control: Option<Control>,
     pub pantalla: Option<(u32, u32)>,
     pub config: Config,
-    /// Configuración de Android pendiente de aplicar (se aplica recreando el contenedor).
+    /// Configuración de Android que se aplica al arrancar recreando el contenedor (ZYKRO se
+    /// volvió a abrir para aplicarla).
     pub reinicio: Option<config::Android>,
     /// El juego tiene abierto su cuadro de texto (chat): el mapeo se apaga para poder escribir.
     pub escribiendo: bool,
@@ -90,7 +91,7 @@ pub fn avisar(estado: &EstadoCompartido, texto: impl Into<String>) {
 pub fn iniciar(ctx: egui::Context, estado: EstadoCompartido, destino: Compartido) {
     thread::Builder::new()
         .name("zykro-android".into())
-        .spawn(move || loop {
+        .spawn(move || {
             let pendiente = estado.lock().unwrap().reinicio.take();
             if let Some(nueva) = pendiente {
                 mensaje(&estado, Etapa::Encender, "Reiniciando Android con la nueva configuración…");
@@ -101,18 +102,15 @@ pub fn iniciar(ctx: egui::Context, estado: EstadoCompartido, destino: Compartido
                     thread::sleep(Duration::from_secs(4));
                 }
             }
-            if let Err(e) = conectar_y_recibir(&ctx, &estado, &destino) {
-                let reiniciando = {
-                    let mut s = estado.lock().unwrap();
-                    s.control = None;
-                    if s.reinicio.is_none() {
+            loop {
+                if let Err(e) = conectar_y_recibir(&ctx, &estado, &destino) {
+                    {
+                        let mut s = estado.lock().unwrap();
+                        s.control = None;
                         s.mensaje = format!("{e}\nReintentando…");
                         s.error = true;
                     }
-                    s.reinicio.is_some()
-                };
-                ctx.request_repaint();
-                if !reiniciando {
+                    ctx.request_repaint();
                     thread::sleep(Duration::from_secs(2));
                 }
             }
@@ -135,9 +133,6 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
     let ruta_control = format!("{SOCKETS}/control.sock");
     let inicio = Instant::now();
     let mut socket_video = loop {
-        if estado.lock().unwrap().reinicio.is_some() {
-            return Err(std::io::Error::other("reinicio pedido"));
-        }
         if Path::new(&ruta_video).exists() && Path::new(&ruta_control).exists() {
             match UnixStream::connect(&ruta_video) {
                 Ok(socket) => break socket,
@@ -378,13 +373,6 @@ pub fn leer_config_android() -> Option<config::Android> {
         return None;
     }
     Some(config::Android::desde_argumentos(&args))
-}
-
-/// Pide aplicar una nueva configuración de Android: corta la conexión apagando el contenedor y
-/// el hilo de Android lo recrea.
-pub fn pedir_reinicio(estado: &EstadoCompartido, nueva: config::Android) {
-    estado.lock().unwrap().reinicio = Some(nueva);
-    thread::spawn(|| docker(&["stop", "-t", "5", CONTENEDOR]));
 }
 
 /// Recrea el contenedor con los mismos ajustes de Docker que le puso SwagPlayer, cambiando solo
