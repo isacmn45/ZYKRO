@@ -43,6 +43,12 @@ const ANCHO_LATERAL: f32 = 34.0;
 /// Refrescos seguidos con un cuadro de retraso antes de saltar uno (medio segundo a 60 Hz).
 const MAX_ATRASADOS: u32 = 30;
 const BORDE: f32 = 5.0; // zona en la orilla para cambiar el tamaño
+const TAMANO_MINIMO: Vec2 = Vec2::new(480.0, 300.0);
+/// Tras cambiar el tamaño de la ventana, cuánto tiene que quedarse quieto antes de ajustarlo.
+const QUIETO: Duration = Duration::from_millis(200);
+/// Cuánto se puede estirar la imagen para llenar la zona sin dejar bordes negros (maximizada no
+/// se puede cambiar el tamaño de la ventana). Más que esto ya se nota deformada.
+const ESTIRAR_MAX: f32 = 0.08;
 
 // Paleta morada, a juego con el ícono (desktop/zykro.svg).
 const FONDO_OSCURO: Color32 = Color32::from_rgb(0x11, 0x0e, 0x1b);
@@ -66,7 +72,7 @@ fn main() -> eframe::Result {
             .with_app_id("zykro")
             .with_decorations(false)
             .with_inner_size([1280.0 + ANCHO_LATERAL, 720.0 + ALTO_TITULO])
-            .with_min_inner_size([480.0, 300.0])
+            .with_min_inner_size(TAMANO_MINIMO)
             .with_icon({
                 let (rgba, width, height) = decodificar_png(ICONO_PNG);
                 egui::IconData { rgba, width, height }
@@ -115,6 +121,45 @@ struct Zykro {
     apuntando_antes: bool,
     mods_previos: egui::Modifiers,
     revision_app: Instant,
+    proporcion: Proporcion,
+}
+
+/// Seguimiento del tamaño de la ventana para ajustarlo a la proporción de Android.
+#[derive(Default)]
+struct Proporcion {
+    /// Último tamaño visto y el que tenía antes de empezar a cambiar.
+    visto: Vec2,
+    antes: Vec2,
+    /// Desde cuándo está cambiando (None: quieta).
+    cambiando: Option<Instant>,
+    /// Orilla que tomó el usuario para cambiar el tamaño.
+    borde: Option<ResizeDirection>,
+    /// Resolución de Android con la que se ajustó.
+    android: (u32, u32),
+    /// Tamaño justo que se pidió: hasta que llegue (o pase el momento) la imagen sigue estirada.
+    pedido: Option<(Vec2, Instant)>,
+    /// Orilla que ZYKRO está arrastrando por su cuenta.
+    arrastre: Option<Arrastre>,
+}
+
+/// Cambio de tamaño desde la orilla derecha, la de abajo o la esquina de abajo a la derecha. Lo
+/// hace ZYKRO y no KWin, que en Wayland no deja mantener la proporción mientras se arrastra: así la
+/// ventana tiene siempre la forma de la imagen. Arriba y a la izquierda hay que mover la ventana, y
+/// eso solo lo puede hacer KWin.
+#[derive(Clone, Copy)]
+struct Arrastre {
+    dir: ResizeDirection,
+    cursor: CursorIcon,
+    /// Dónde se tomó la orilla y el tamaño que tenía la ventana.
+    puntero: Pos2,
+    tam: Vec2,
+}
+
+impl Proporcion {
+    /// La ventana está cambiando de tamaño y todavía no tiene la proporción de Android.
+    fn ajustando(&self) -> bool {
+        self.cambiando.is_some() || self.pedido.is_some_and(|(_, hasta)| Instant::now() < hasta)
+    }
 }
 
 impl Zykro {
@@ -170,6 +215,7 @@ impl Zykro {
             apuntando_antes: false,
             mods_previos: egui::Modifiers::NONE,
             revision_app: Instant::now() - Duration::from_secs(5),
+            proporcion: Proporcion::default(),
         }
     }
 
@@ -251,15 +297,15 @@ impl Zykro {
         }
         let mut trabajo = egui::text::LayoutJob::default();
         for (i, (texto, color)) in partes.into_iter().enumerate() {
-            let separador = if i > 0 { "   ·   " } else { "" };
-            trabajo.append(separador, 0.0, egui::TextFormat { font_id: FontId::proportional(15.0), color: TENUE, ..Default::default() });
-            trabajo.append(&texto, 0.0, egui::TextFormat { font_id: FontId::proportional(15.0), color, ..Default::default() });
+            let separador = if i > 0 { "  ·  " } else { "" };
+            trabajo.append(separador, 0.0, egui::TextFormat { font_id: FontId::proportional(11.0), color: TENUE, ..Default::default() });
+            trabajo.append(&texto, 0.0, egui::TextFormat { font_id: FontId::proportional(11.0), color, ..Default::default() });
         }
         let galeria = ui.painter().layout_job(trabajo);
-        let margen = Vec2::new(14.0, 9.0);
+        let margen = Vec2::new(6.0, 2.0);
         let tam = galeria.size() + margen * 2.0;
-        let caja = Rect::from_min_size(Pos2::new(area.min.x + 16.0, area.max.y - 16.0 - tam.y), tam);
-        ui.painter().rect(caja, 8.0, FONDO_OSCURO.gamma_multiply(0.8), Stroke::new(1.0, FONDO_HOVER), egui::StrokeKind::Inside);
+        let caja = Rect::from_min_size(Pos2::new(area.min.x + 4.0, area.max.y - 4.0 - tam.y), tam);
+        ui.painter().rect_filled(caja, 4.0, FONDO_OSCURO.gamma_multiply(0.7));
         ui.painter().galley(caja.min + margen, galeria, TEXTO);
         ui.ctx().request_repaint_after(Duration::from_secs(1));
     }
@@ -273,11 +319,143 @@ impl Zykro {
             return;
         }
         // En Wayland no hay `inner_rect` (no se conoce la posición): el tamaño sale del contenido.
-        let interior = ctx.content_rect();
+        let tam = self.tamano_justo(ctx.content_rect().size(), false, None);
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(tam));
+    }
+
+    /// Tamaño de ventana en el que la imagen de Android cabe justa, conservando el ancho
+    /// (`por_ancho`) o el alto de `tam`, sin bajar del mínimo ni pasar de `maximo`.
+    fn tamano_justo(&self, tam: Vec2, por_ancho: bool, maximo: Option<Vec2>) -> Vec2 {
         let (w, h) = self.dimensiones();
-        let video = (interior.height() - ALTO_TITULO) * w / h;
-        let ancho = video.round() + if self.lateral { ANCHO_LATERAL } else { 0.0 };
-        ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(ancho, interior.height())));
+        let lateral = if self.lateral { ANCHO_LATERAL } else { 0.0 };
+        let desde_alto = |alto: f32| Vec2::new(((alto - ALTO_TITULO) * w / h).round() + lateral, alto);
+        let desde_ancho = |ancho: f32| Vec2::new(ancho, ((ancho - lateral) * h / w).round() + ALTO_TITULO);
+        let mut t = if por_ancho { desde_ancho(tam.x) } else { desde_alto(tam.y) };
+        if t.y < TAMANO_MINIMO.y {
+            t = desde_alto(TAMANO_MINIMO.y);
+        }
+        if t.x < TAMANO_MINIMO.x {
+            t = desde_ancho(TAMANO_MINIMO.x);
+        }
+        if let Some(m) = maximo {
+            if t.y > m.y {
+                t = desde_alto(m.y);
+            }
+            if t.x > m.x {
+                t = desde_ancho(m.x);
+            }
+        }
+        t
+    }
+
+    /// Cuando el usuario cambia el tamaño de la ventana (o KWin la acomoda), la ajusta a la
+    /// proporción de Android para que no queden bordes negros. Espera a que el tamaño se quede
+    /// quieto: mientras se arrastra la orilla, el tamaño lo pone KWin. Si se arrastró un lado se
+    /// respeta el ancho elegido; arriba o abajo, el alto; una esquina, lo que más cambió.
+    fn ajustar_proporcion(&mut self, ctx: &egui::Context) {
+        let (maximizada, completa, monitor) = ctx.input(|i| {
+            let v = i.viewport();
+            (v.maximized.unwrap_or(false), v.fullscreen.unwrap_or(false), v.monitor_size)
+        });
+        let tam = ctx.content_rect().size();
+        let android = self.estado.lock().unwrap().pantalla.unwrap_or((1280, 720));
+        let p = &mut self.proporcion;
+        if p.arrastre.is_some() {
+            // Lo ajusta el arrastre mismo.
+            p.visto = tam;
+            p.cambiando = None;
+            return;
+        }
+        if maximizada || completa {
+            *p = Proporcion { visto: tam, android, ..Default::default() };
+            return;
+        }
+        if tam != p.visto || android != p.android {
+            if p.pedido.take().is_some_and(|(pedido, _)| (pedido - tam).length() < 2.0) {
+                // Llegó el tamaño que se pidió.
+                p.visto = tam;
+                return;
+            }
+            if p.cambiando.is_none() {
+                p.antes = p.visto;
+            }
+            p.visto = tam;
+            p.android = android;
+            p.cambiando = Some(Instant::now());
+        }
+        let Some(desde) = p.cambiando else { return };
+        if desde.elapsed() < QUIETO {
+            ctx.request_repaint_after(QUIETO - desde.elapsed());
+            return;
+        }
+        p.cambiando = None;
+        let cambio = |nuevo: f32, viejo: f32| if viejo > 0.0 { (nuevo - viejo).abs() / viejo } else { 0.0 };
+        let por_ancho = match p.borde.take() {
+            Some(ResizeDirection::East | ResizeDirection::West) => true,
+            Some(ResizeDirection::North | ResizeDirection::South) => false,
+            _ => cambio(tam.x, p.antes.x) > cambio(tam.y, p.antes.y),
+        };
+        let justo = self.tamano_justo(tam, por_ancho, monitor);
+        if (justo - tam).length() >= 1.0 {
+            ctx.send_viewport_cmd(ViewportCommand::InnerSize(justo));
+            self.proporcion.pedido = Some((justo, Instant::now() + Duration::from_millis(500)));
+            ctx.request_repaint_after(Duration::from_millis(500));
+        }
+    }
+
+    /// Orillas de la ventana para cambiar el tamaño. Devuelve si el mouse está sobre una (o
+    /// arrastrándola), para no mandar ese clic a Android.
+    fn orillas(&mut self, ctx: &egui::Context) -> bool {
+        if self.seguir_arrastre(ctx) {
+            return true;
+        }
+        let (en_borde, tomada) = cambiar_tamano(ctx);
+        if let Some((dir, cursor)) = tomada {
+            let puntero = ctx.input(|i| i.pointer.press_origin());
+            match (dir, puntero) {
+                (ResizeDirection::East | ResizeDirection::South | ResizeDirection::SouthEast, Some(puntero)) => {
+                    let tam = ctx.content_rect().size();
+                    self.proporcion.arrastre = Some(Arrastre { dir, cursor, puntero, tam });
+                }
+                _ => {
+                    ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
+                    self.proporcion.borde = Some(dir);
+                }
+            }
+        }
+        en_borde
+    }
+
+    /// Sigue el arrastre propio de una orilla: la ventana toma el tamaño justo en cada movimiento.
+    fn seguir_arrastre(&mut self, ctx: &egui::Context) -> bool {
+        let Some(a) = self.proporcion.arrastre else { return false };
+        let (abajo, puntero, monitor) = ctx.input(|i| (i.pointer.primary_down(), i.pointer.latest_pos(), i.viewport().monitor_size));
+        if !abajo {
+            self.proporcion.arrastre = None;
+            return false;
+        }
+        ctx.set_cursor_icon(a.cursor);
+        if let Some(p) = puntero {
+            let d = p - a.puntero;
+            let crudo = a.tam
+                + match a.dir {
+                    ResizeDirection::East => Vec2::new(d.x, 0.0),
+                    ResizeDirection::South => Vec2::new(0.0, d.y),
+                    _ => d,
+                };
+            let por_ancho = match a.dir {
+                ResizeDirection::East => true,
+                ResizeDirection::South => false,
+                // En la esquina manda el lado que deja la ventana más grande: así sigue al puntero
+                // sin saltos.
+                _ => self.tamano_justo(crudo, true, None).y >= self.tamano_justo(crudo, false, None).y,
+            };
+            let justo = self.tamano_justo(crudo, por_ancho, monitor);
+            if (justo - ctx.content_rect().size()).length() >= 1.0 {
+                ctx.send_viewport_cmd(ViewportCommand::InnerSize(justo));
+            }
+        }
+        true
     }
 
     /// Botón de controles: abre o cierra el menú rápido (o cierra el editor si está abierto).
@@ -621,8 +799,17 @@ impl Zykro {
                 };
                 (w as f32, h as f32, carga, aviso)
             };
-            let escala = (area.width() / ancho).min(area.height() / alto);
-            let rect = Rect::from_center_size(area.center(), Vec2::new(ancho * escala, alto * escala));
+            // Si a la zona le falta poco para la proporción de Android (maximizada, la barra de
+            // título y la lateral se comen un poco), la imagen se estira en vez de dejar bordes.
+            // También mientras KWin cambia el tamaño (orillas de arriba o la izquierda), hasta que
+            // la ventana se ajuste a su proporción: así se ve entera, sin bordes ni recortes.
+            let desfase = (area.width() / area.height()) / (ancho / alto);
+            let rect = if (desfase - 1.0).abs() <= ESTIRAR_MAX || self.proporcion.ajustando() {
+                area
+            } else {
+                let escala = (area.width() / ancho).min(area.height() / alto);
+                Rect::from_center_size(area.center(), Vec2::new(ancho * escala, alto * escala))
+            };
 
             if let Some(id) = self.pantalla.id() {
                 let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
@@ -791,7 +978,8 @@ impl eframe::App for Zykro {
         self.contar_fps();
 
         let pantalla_completa = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-        let en_borde = cambiar_tamano(ctx);
+        let en_borde = self.orillas(ctx);
+        self.ajustar_proporcion(ctx);
         self.actualizar_mapeo(ctx);
         if !pantalla_completa {
             self.barra_titulo(ui, en_borde);
@@ -927,15 +1115,17 @@ fn alternar_pantalla_completa(ctx: &egui::Context) {
 }
 
 /// La ventana no tiene bordes del sistema: las orillas cambian el tamaño a mano.
-/// Devuelve `true` si el mouse está sobre una orilla.
-fn cambiar_tamano(ctx: &egui::Context) -> bool {
+/// Devuelve si el mouse está sobre una orilla y, si se acaba de tomar, cuál (y su cursor).
+fn cambiar_tamano(ctx: &egui::Context) -> (bool, Option<(ResizeDirection, CursorIcon)>) {
     let (maximizado, completa) = ctx.input(|i| {
         (i.viewport().maximized.unwrap_or(false), i.viewport().fullscreen.unwrap_or(false))
     });
     if maximizado || completa {
-        return false;
+        return (false, None);
     }
-    let Some(p) = ctx.input(|i| i.pointer.hover_pos()) else { return false };
+    // Al presionar cuenta dónde se presionó: si el cuadro llega tarde, el puntero ya se movió.
+    let (presionado, origen, encima) = ctx.input(|i| (i.pointer.primary_pressed(), i.pointer.press_origin(), i.pointer.hover_pos()));
+    let Some(p) = origen.filter(|_| presionado).or(encima) else { return (false, None) };
     let r = ctx.content_rect();
     let (izq, der) = (p.x < r.min.x + BORDE, p.x > r.max.x - BORDE);
     let (arr, aba) = (p.y < r.min.y + BORDE, p.y > r.max.y - BORDE);
@@ -948,13 +1138,11 @@ fn cambiar_tamano(ctx: &egui::Context) -> bool {
         (_, true, ..) => (ResizeDirection::East, CursorIcon::ResizeEast),
         (_, _, true, _) => (ResizeDirection::North, CursorIcon::ResizeNorth),
         (_, _, _, true) => (ResizeDirection::South, CursorIcon::ResizeSouth),
-        _ => return false,
+        _ => return (false, None),
     };
     ctx.set_cursor_icon(cursor);
-    if ctx.input(|i| i.pointer.primary_pressed()) {
-        ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
-    }
-    true
+    let tomada = ctx.input(|i| i.pointer.primary_pressed()).then_some((dir, cursor));
+    (true, tomada)
 }
 
 fn carpeta_capturas() -> PathBuf {
