@@ -52,19 +52,10 @@ impl Recientes {
 
     /// Guarda una miniatura del cuadro actual para `paquete` (la app que está al frente).
     pub fn guardar_miniatura(&mut self, paquete: &str, cuadro: &Cuadro) {
-        if cuadro.ancho == 0 || cuadro.alto == 0 {
+        if cuadro.ancho() == 0 || cuadro.alto() == 0 {
             return;
         }
-        let (w, h) = (ANCHO_MINIATURA, (ANCHO_MINIATURA * cuadro.alto / cuadro.ancho).max(1));
-        let mut rgba = Vec::with_capacity(w * h * 4);
-        for y in 0..h {
-            let fila = (y * cuadro.alto / h) * cuadro.ancho;
-            for x in 0..w {
-                let i = (fila + x * cuadro.ancho / w) * 4;
-                rgba.extend_from_slice(&cuadro.rgba[i..i + 4]);
-            }
-        }
-        self.miniaturas.insert(paquete.to_string(), (ColorImage::from_rgba_unmultiplied([w, h], &rgba), true));
+        self.miniaturas.insert(paquete.to_string(), (cuadro.miniatura(ANCHO_MINIATURA), true));
     }
 
     /// Dibuja el selector sobre `area` (la zona del video).

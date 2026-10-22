@@ -1,13 +1,16 @@
 //! Video sin comprimir desde `video.sock`: el servidor comparte los buffers de pantalla de Android
-//! (DMA-BUF) y avisa cuál mostrar. Formato en docs/investigacion.md.
+//! (DMA-BUF) y avisa cuál mostrar. Formato en docs/investigacion.md. La ventana los muestra directo
+//! desde la GPU (`textura.rs`), sin copiarlos.
 
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{self, IoSliceMut, Read};
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use eframe::egui::{Color32, ColorImage};
 use memmap2::{Mmap, MmapOptions};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::sys::socket::{recvmsg, ControlMessageOwned, MsgFlags};
@@ -17,12 +20,108 @@ const SYNC_READ: u64 = 1;
 const SYNC_START: u64 = 0;
 const SYNC_END: u64 = 4;
 
-/// Cuadro recibido, listo para subir a la GPU.
-pub struct Cuadro {
+static SERIE: AtomicU64 = AtomicU64::new(1);
+
+/// Buffer de pantalla de Android (DMA-BUF). Android lo vuelve a usar unos 5 cuadros después.
+pub struct Buffer {
+    /// Número único: un buffer nuevo nunca se confunde con uno anterior del mismo id.
+    pub serie: u64,
+    archivo: File,
+    mapa: Mmap,
     pub ancho: usize,
     pub alto: usize,
-    pub rgba: Vec<u8>,
+    pub stride: usize,
+    pub bgra: bool,
+    /// Modificador DRM (0 = lineal).
+    pub modificador: u64,
 }
+
+impl Buffer {
+    pub fn fd(&self) -> RawFd {
+        self.archivo.as_raw_fd()
+    }
+
+    /// Copia los píxeles a la CPU en RGBA (opaco). Solo para capturas y el camino sin GPU.
+    pub fn leer(&self) -> Vec<Color32> {
+        let mut pixeles = Vec::with_capacity(self.ancho * self.alto);
+        self.con_mapa(|mapa| {
+            for y in 0..self.alto {
+                let fila = &mapa[y * self.stride..y * self.stride + self.ancho * 4];
+                pixeles.extend(fila.chunks_exact(4).map(|p| self.color(p)));
+            }
+        });
+        pixeles
+    }
+
+    /// Copia reducida a `ancho` píxeles de ancho (miniaturas): lee solo los píxeles que usa.
+    pub fn reducir(&self, ancho: usize) -> ColorImage {
+        let (w, h) = (ancho, (ancho * self.alto / self.ancho.max(1)).max(1));
+        let mut pixeles = Vec::with_capacity(w * h);
+        self.con_mapa(|mapa| {
+            for y in 0..h {
+                let fila = (y * self.alto / h) * self.stride;
+                pixeles.extend((0..w).map(|x| {
+                    let i = fila + (x * self.ancho / w) * 4;
+                    self.color(&mapa[i..i + 4])
+                }));
+            }
+        });
+        ColorImage::new([w, h], pixeles)
+    }
+
+    fn color(&self, p: &[u8]) -> Color32 {
+        // La pantalla es opaca: el cuarto byte no se usa.
+        if self.bgra {
+            Color32::from_rgb(p[2], p[1], p[0])
+        } else {
+            Color32::from_rgb(p[0], p[1], p[2])
+        }
+    }
+
+    fn con_mapa(&self, f: impl FnOnce(&[u8])) {
+        sync(self.fd(), SYNC_START | SYNC_READ);
+        f(&self.mapa);
+        sync(self.fd(), SYNC_END | SYNC_READ);
+    }
+}
+
+/// Cuadro recibido: el buffer donde está y, si la ventana no puede leerlo desde la GPU, la copia.
+#[derive(Clone)]
+pub struct Cuadro {
+    pub buffer: Arc<Buffer>,
+    pub copia: Option<ColorImage>,
+}
+
+impl Cuadro {
+    pub fn ancho(&self) -> usize {
+        self.buffer.ancho
+    }
+
+    pub fn alto(&self) -> usize {
+        self.buffer.alto
+    }
+
+    /// Copia reducida a `ancho` píxeles de ancho (miniaturas del selector de apps).
+    pub fn miniatura(&self, ancho: usize) -> ColorImage {
+        match &self.copia {
+            Some(c) => {
+                let (w, h) = (ancho, (ancho * c.size[1] / c.size[0].max(1)).max(1));
+                let pixeles = (0..w * h).map(|i| c.pixels[(i / w * c.size[1] / h) * c.size[0] + (i % w) * c.size[0] / w]);
+                ColorImage::new([w, h], pixeles.collect())
+            }
+            None => self.buffer.reducir(ancho),
+        }
+    }
+
+    /// Los píxeles en la CPU (capturas de pantalla).
+    pub fn imagen(&self) -> ColorImage {
+        self.copia.clone().unwrap_or_else(|| ColorImage::new([self.ancho(), self.alto()], self.buffer.leer()))
+    }
+}
+
+/// La ventana lo activa si no puede mostrar los buffers directo desde la GPU: entonces el hilo de
+/// video copia cada cuadro (como antes, más lento).
+pub static COPIAR: AtomicBool = AtomicBool::new(false);
 
 /// Cuadros recibidos que la ventana todavía no mostró, del más viejo al más nuevo.
 ///
@@ -34,15 +133,6 @@ pub type Compartido = Arc<Mutex<VecDeque<Cuadro>>>;
 
 /// Cuadros como máximo en la cola: si se acumulan más, se tiran los viejos para no sumar retraso.
 const MAX_COLA: usize = 2;
-
-struct Buffer {
-    _archivo: File,
-    mapa: Mmap,
-    ancho: usize,
-    alto: usize,
-    stride: usize,
-    bgra: bool,
-}
 
 /// Datos de la cabecera DMB2.
 pub struct Pantalla {
@@ -87,7 +177,7 @@ pub fn leer_cabecera(socket: &mut UnixStream) -> io::Result<Pantalla> {
 
 /// Recibe cuadros hasta que se cierre la conexión. Llama a `nuevo` con cada cuadro.
 pub fn recibir_cuadros(socket: UnixStream, destino: Compartido, mut nuevo: impl FnMut()) -> io::Result<()> {
-    let mut buffers: HashMap<u32, Buffer> = HashMap::new();
+    let mut buffers: HashMap<u32, Arc<Buffer>> = HashMap::new();
     let mut paquete = [0u8; 64];
     loop {
         let (n, mut fds) = recibir(&socket, &mut paquete)?;
@@ -103,9 +193,12 @@ pub fn recibir_cuadros(socket: UnixStream, destino: Compartido, mut nuevo: impl 
             b"DMBR" if n >= 36 && !fds.is_empty() => {
                 let (ancho, alto, stride, tam, formato) =
                     (be32(d, 8) as usize, be32(d, 12) as usize, be32(d, 16) as usize, be32(d, 20) as usize, be32(d, 24));
+                let modificador = if n >= 44 { u64::from_be_bytes(d[36..44].try_into().unwrap()) } else { 0 };
                 let archivo = File::from(fds.remove(0));
                 let mapa = unsafe { MmapOptions::new().len(tam).map(&archivo)? };
-                buffers.insert(id, Buffer { _archivo: archivo, mapa, ancho, alto, stride, bgra: formato == 5 });
+                let serie = SERIE.fetch_add(1, Ordering::Relaxed);
+                let buffer = Buffer { serie, archivo, mapa, ancho, alto, stride, bgra: formato == 5, modificador };
+                buffers.insert(id, Arc::new(buffer));
             }
             b"DMBX" => {
                 // Si trae una fence, esperar (máx. 50 ms) a que Android termine de dibujar.
@@ -114,21 +207,9 @@ pub fn recibir_cuadros(socket: UnixStream, destino: Compartido, mut nuevo: impl 
                     let _ = poll(&mut pfd, PollTimeout::from(50u8));
                 }
                 let Some(b) = buffers.get(&id) else { continue };
-                let fila = b.ancho * 4;
-                let mut rgba = Vec::with_capacity(fila * b.alto);
-                let fd = b._archivo.as_raw_fd();
-                sync(fd, SYNC_START | SYNC_READ);
-                for y in 0..b.alto {
-                    rgba.extend_from_slice(&b.mapa[y * b.stride..y * b.stride + fila]);
-                }
-                sync(fd, SYNC_END | SYNC_READ);
-                if b.bgra {
-                    for px in rgba.chunks_exact_mut(4) {
-                        px.swap(0, 2);
-                    }
-                }
+                let copia = COPIAR.load(Ordering::Relaxed).then(|| ColorImage::new([b.ancho, b.alto], b.leer()));
                 let mut cola = destino.lock().unwrap();
-                cola.push_back(Cuadro { ancho: b.ancho, alto: b.alto, rgba });
+                cola.push_back(Cuadro { buffer: b.clone(), copia });
                 while cola.len() > MAX_COLA {
                     cola.pop_front();
                 }

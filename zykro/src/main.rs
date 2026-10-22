@@ -17,6 +17,7 @@ mod recientes;
 mod rendimiento;
 mod rueda;
 mod sensores;
+mod textura;
 mod video;
 
 use std::path::PathBuf;
@@ -80,7 +81,7 @@ struct Zykro {
     logo: egui::TextureHandle,
     estado: android::EstadoCompartido,
     video: video::Compartido,
-    textura: Option<egui::TextureHandle>,
+    pantalla: textura::Pantalla,
     /// Último cuadro mostrado (para las capturas de pantalla).
     cuadro: Option<video::Cuadro>,
     /// Refrescos seguidos mostrando el cuadro con uno de retraso (ver `actualizar_textura`).
@@ -145,7 +146,7 @@ impl Zykro {
             logo,
             estado,
             video,
-            textura: None,
+            pantalla: textura::Pantalla::new(),
             cuadro: None,
             atrasados: 0,
             lateral: true,
@@ -434,7 +435,7 @@ impl Zykro {
     }
 
     /// Sube a la GPU el cuadro nuevo, si llegó uno.
-    fn actualizar_textura(&mut self, ctx: &egui::Context) {
+    fn actualizar_textura(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Un cuadro por refresco, en orden; si queda otro en la cola, se muestra en el siguiente.
         // Si eso dura medio segundo (cada cuadro sale un refresco tarde, ~17 ms), se salta uno para
         // no arrastrar ese retraso.
@@ -446,15 +447,11 @@ impl Zykro {
             (cola.pop_front(), !cola.is_empty())
         };
         self.atrasados = if quedan { (self.atrasados + 1).min(MAX_ATRASADOS) } else { 0 };
-        let Some(cuadro) = cuadro else { return };
+        let Some(mut cuadro) = cuadro else { return };
         if quedan {
             ctx.request_repaint();
         }
-        let imagen = egui::ColorImage::from_rgba_unmultiplied([cuadro.ancho, cuadro.alto], &cuadro.rgba);
-        match &mut self.textura {
-            Some(t) => t.set(imagen, TextureOptions::LINEAR),
-            None => self.textura = Some(ctx.load_texture("android", imagen, TextureOptions::LINEAR)),
-        }
+        self.pantalla.mostrar(ctx, frame, &mut cuadro);
         self.cuadro = Some(cuadro);
         self.cuadros_seg += 1;
     }
@@ -468,10 +465,11 @@ impl Zykro {
     }
 
     fn captura(&self) {
-        let Some(c) = &self.cuadro else { return };
-        let (ancho, alto, rgba) = (c.ancho as u32, c.alto as u32, c.rgba.clone());
+        let Some(c) = self.cuadro.clone() else { return };
         let estado = self.estado.clone();
         thread::spawn(move || {
+            let imagen = c.imagen();
+            let (ancho, alto, rgba) = (imagen.size[0] as u32, imagen.size[1] as u32, imagen.as_raw());
             let carpeta = carpeta_capturas();
             let _ = std::fs::create_dir_all(&carpeta);
             let fecha = Command::new("date").arg("+%Y%m%d-%H%M%S").output();
@@ -618,7 +616,7 @@ impl Zykro {
                     desde: s.etapa_desde,
                     mensaje: s.mensaje.clone(),
                     error: s.error,
-                    sobre_video: self.textura.is_some(),
+                    sobre_video: self.pantalla.id().is_some(),
                     logo: self.logo.id(),
                 };
                 (w as f32, h as f32, carga, aviso)
@@ -626,9 +624,9 @@ impl Zykro {
             let escala = (area.width() / ancho).min(area.height() / alto);
             let rect = Rect::from_center_size(area.center(), Vec2::new(ancho * escala, alto * escala));
 
-            if let Some(t) = &self.textura {
+            if let Some(id) = self.pantalla.id() {
                 let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
-                ui.painter().image(t.id(), rect, uv, Color32::WHITE);
+                ui.painter().image(id, rect, uv, Color32::WHITE);
             }
             let escribiendo = self.estado.lock().unwrap().escribiendo;
             if self.editor.abierto {
@@ -645,7 +643,7 @@ impl Zykro {
                 ui.painter().rect_filled(caja, 12.0, FONDO.gamma_multiply(0.92));
                 ui.painter().galley(caja.center() - galeria.size() / 2.0, galeria, TEXTO);
             }
-            if self.textura.is_none() || !carga.mensaje.is_empty() {
+            if self.pantalla.id().is_none() || !carga.mensaje.is_empty() {
                 carga::dibujar(ui, area, &carga);
                 ctx.request_repaint_after(Duration::from_millis(16));
             }
@@ -780,7 +778,7 @@ impl Zykro {
 }
 
 impl eframe::App for Zykro {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let ctx = &ctx;
         // Las teclas son para Android: que ningún botón se quede con el foco del teclado.
@@ -789,7 +787,7 @@ impl eframe::App for Zykro {
                 m.surrender_focus(id);
             }
         });
-        self.actualizar_textura(ctx);
+        self.actualizar_textura(ctx, frame);
         self.contar_fps();
 
         let pantalla_completa = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
@@ -837,7 +835,7 @@ impl eframe::App for Zykro {
         }
     }
 
-    fn on_exit(&mut self) {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.cerrar_menu();
         rendimiento::restaurar();
         android::apagar();
