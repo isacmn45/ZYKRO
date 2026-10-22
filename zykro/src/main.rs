@@ -213,6 +213,22 @@ impl Zykro {
         self.editor.abrir(&paquete, mapa);
     }
 
+    /// Ajusta el ancho de la ventana a la imagen de Android para que no queden bordes negros a los
+    /// lados: con la barra lateral plegada la imagen ocupa todo el ancho, y desplegada se suma la
+    /// barra. Maximizada o en pantalla completa no se puede cambiar el tamaño.
+    fn ajustar_ancho(&self, ctx: &egui::Context) {
+        let (maximizada, completa) = ctx.input(|i| (i.viewport().maximized.unwrap_or(false), i.viewport().fullscreen.unwrap_or(false)));
+        if maximizada || completa {
+            return;
+        }
+        // En Wayland no hay `inner_rect` (no se conoce la posición): el tamaño sale del contenido.
+        let interior = ctx.content_rect();
+        let (w, h) = self.dimensiones();
+        let video = (interior.height() - ALTO_TITULO) * w / h;
+        let ancho = video.round() + if self.lateral { ANCHO_LATERAL } else { 0.0 };
+        ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(ancho, interior.height())));
+    }
+
     /// Botón de controles: abre o cierra el menú rápido (o cierra el editor si está abierto).
     fn boton_controles(&mut self, boton: &egui::Response, abajo: bool) {
         if !boton.clicked() {
@@ -471,6 +487,7 @@ impl Zykro {
                         let lado = if self.lateral { ic::CARET_DOUBLE_RIGHT } else { ic::CARET_DOUBLE_LEFT };
                         if icono(ui, lado, "Barra lateral", t, FONDO_HOVER).clicked() {
                             self.lateral = !self.lateral;
+                            self.ajustar_ancho(ctx);
                         }
                         ui.add_space(6.0);
                         if icono(ui, ic::X, "Cerrar", t, CERRAR_HOVER).clicked() {
@@ -482,9 +499,6 @@ impl Zykro {
                         }
                         if icono(ui, ic::MINUS, "Minimizar", t, FONDO_HOVER).clicked() {
                             ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
-                        }
-                        if icono(ui, ic::LIST, "Configuración", t, FONDO_HOVER).clicked() {
-                            self.abrir_ajustes();
                         }
                         let boton = icono(ui, ic::GAME_CONTROLLER, "Controles del juego", t, FONDO_HOVER);
                         self.boton_controles(&boton, true);
@@ -506,6 +520,9 @@ impl Zykro {
                 let t = Vec2::new(ANCHO_LATERAL, 30.0);
                 ui.vertical_centered(|ui| {
                     ui.add_space(4.0);
+                    if icono(ui, ic::CORNERS_OUT, "Pantalla completa (F11)", t, FONDO_HOVER).clicked() {
+                        alternar_pantalla_completa(ctx);
+                    }
                     if icono(ui, ic::GEAR, "Configuración", t, FONDO_HOVER).clicked() {
                         self.abrir_ajustes();
                     }
@@ -516,9 +533,6 @@ impl Zykro {
                     }
                     if icono(ui, ic::SPEAKER_LOW, "Bajar volumen", t, FONDO_HOVER).clicked() {
                         self.pulsar(25);
-                    }
-                    if icono(ui, ic::CORNERS_OUT, "Pantalla completa (F11)", t, FONDO_HOVER).clicked() {
-                        alternar_pantalla_completa(ctx);
                     }
                     if icono(ui, ic::CAMERA, "Captura de pantalla", t, FONDO_HOVER).clicked() {
                         self.captura();
