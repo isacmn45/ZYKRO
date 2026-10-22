@@ -1,7 +1,7 @@
 #!/bin/sh
 # Instala nuestras mejoras de SwagPlayer en ~/.local.
 # Vuelve a correrlo después de cambiar algo en el repositorio.
-#   ./instalar.sh            -> scripts, programas compilados y acceso directo
+#   ./instalar.sh            -> scripts, programas compilados, ZYKRO y accesos directos
 #   ./instalar.sh --keymap   -> además copia nuestro mapeo de Free Fire
 set -e
 cd "$(dirname "$0")"
@@ -20,7 +20,19 @@ rm -f /tmp/teclado-fisico.$$ /tmp/closefix.$$.so
 for f in bin/*; do install -m 755 "$f" "$BIN/"; done
 
 sed "s|@HOME@|$HOME|g" desktop/com.swagplayer.SwagPlayer.desktop > "$APPS/com.swagplayer.SwagPlayer.desktop"
+
+# ZYKRO: se compila con prioridad baja para no quitarle CPU a Android si está corriendo.
+if command -v cargo >/dev/null; then
+    (cd zykro && nice -n 19 cargo build --release)
+    install -m 755 zykro/target/release/zykro "$BIN/zykro"
+    install -Dm 644 desktop/zykro.svg "$HOME/.local/share/icons/hicolor/scalable/apps/zykro.svg"
+    sed "s|@HOME@|$HOME|g" desktop/zykro.desktop > "$APPS/zykro.desktop"
+else
+    echo "Sin cargo no se puede compilar ZYKRO (instala Rust)."
+fi
+
 update-desktop-database "$APPS" 2>/dev/null || true
+command -v kbuildsycoca6 >/dev/null && kbuildsycoca6 >/dev/null 2>&1 || true
 
 if [ "$1" = "--keymap" ]; then
     mkdir -p "$HOME/.config/swagplayer/keymap"
@@ -28,4 +40,4 @@ if [ "$1" = "--keymap" ]; then
     echo "Mapeo copiado."
 fi
 
-echo "Listo. Abre SwagPlayer desde su ícono."
+echo "Listo. Abre SwagPlayer o ZYKRO desde su ícono."

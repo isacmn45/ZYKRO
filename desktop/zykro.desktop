@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ZYKRO
+GenericName=Emulador de Android
+Comment=Emulador de Android para jugar en Linux
+Exec=@HOME@/.local/bin/zykro
+Icon=zykro
+Terminal=false
+Categories=Game;Emulator;
+Keywords=android;emulador;juegos;free fire;
+StartupNotify=true
+StartupWMClass=zykro
