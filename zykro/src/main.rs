@@ -293,7 +293,6 @@ impl Zykro {
         android::vigilar_texto(cc.egui_ctx.clone(), estado.clone());
         audio::iniciar();
         aplicar_modo(&estado, estado.lock().unwrap().config.modo, false);
-        ritmo::fluida(estado.lock().unwrap().config.imagen_fluida);
         let motor = Arc::new(Mutex::new(mapeo::Motor::new()));
         let raton_directo = Arc::new(AtomicBool::new(false));
         let raton_listo = Arc::new(AtomicBool::new(false));
@@ -347,7 +346,6 @@ impl Zykro {
 
     fn aplicar_config(&mut self, ctx: &egui::Context, nueva: config::Config) {
         nueva.guardar();
-        ritmo::fluida(nueva.imagen_fluida);
         let anterior = std::mem::replace(&mut self.estado.lock().unwrap().config, nueva.clone());
         if nueva.android != anterior.android {
             // ZYKRO se cierra y se vuelve a abrir, y la ventana nueva recrea Android: así la
@@ -405,8 +403,8 @@ impl Zykro {
         Some((texto, color))
     }
 
-    /// En pantalla completa no hay barra de título: FPS y temperatura van en una cajita abajo a la
-    /// izquierda, como en BlueStacks.
+    /// En pantalla completa no hay barra de título: FPS y temperatura van en una cajita pegada a la
+    /// esquina de abajo a la izquierda, como en BlueStacks.
     fn indicadores(&self, ui: &egui::Ui, area: Rect) {
         let mut partes: Vec<(String, Color32)> = Vec::new();
         if self.config().mostrar_fps {
@@ -425,10 +423,11 @@ impl Zykro {
             trabajo.append(&texto, 0.0, egui::TextFormat { font_id: FontId::proportional(11.0), color, ..Default::default() });
         }
         let galeria = ui.painter().layout_job(trabajo);
-        let margen = Vec2::new(6.0, 2.0);
+        let margen = Vec2::new(5.0, 1.0);
         let tam = galeria.size() + margen * 2.0;
-        let caja = Rect::from_min_size(Pos2::new(area.min.x + 4.0, area.max.y - 4.0 - tam.y), tam);
-        ui.painter().rect_filled(caja, 4.0, FONDO_OSCURO.gamma_multiply(0.7));
+        // Sin separación del borde: solo se redondea la punta de adentro.
+        let caja = Rect::from_min_size(Pos2::new(area.min.x, area.max.y - tam.y), tam);
+        ui.painter().rect_filled(caja, egui::CornerRadius { ne: 4, ..Default::default() }, FONDO_OSCURO.gamma_multiply(0.7));
         ui.painter().galley(caja.min + margen, galeria, TEXTO);
         ui.ctx().request_repaint_after(Duration::from_secs(1));
     }
@@ -745,10 +744,10 @@ impl Zykro {
     /// Muestra el siguiente cuadro de Android, si toca. Devuelve cuándo lo avisó el servidor y cuándo
     /// quedó listo.
     fn actualizar_textura(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) -> Option<(Instant, Instant)> {
-        // Cada cuadro sale apenas llega, salvo con la imagen fluida o si llegan dos juntos: entonces
-        // espera a que KWin tome el anterior (si no, lo taparía antes de salir en pantalla). Si los
-        // cuadros salen tarde medio segundo seguido (~17 ms cada uno), uno no espera (tapa al
-        // anterior) para no arrastrar ese retraso.
+        // Cada cuadro sale apenas llega. Si llegan dos juntos, el segundo espera a que KWin tome el
+        // primero (si no, lo taparía antes de salir en pantalla). Si los cuadros salen tarde medio
+        // segundo seguido (~17 ms cada uno), uno no espera (tapa al anterior) para no arrastrar ese
+        // retraso.
         let atrasado = self.atrasados >= MAX_ATRASADOS;
         let libre = atrasado || ritmo::video_libre();
         let (cuadro, quedan) = {
@@ -984,11 +983,13 @@ impl Zykro {
                 self.indicadores(ui, area);
             }
             if let Some(texto) = aviso {
-                let pos = area.right_bottom() - Vec2::new(12.0, 12.0);
+                // Pegado a la esquina de abajo a la derecha, como la cajita de FPS en la otra.
                 let galeria = ui.painter().layout_no_wrap(texto, FontId::proportional(13.0), TEXTO);
-                let caja = Rect::from_min_size(pos - galeria.size() - Vec2::splat(12.0), galeria.size() + Vec2::splat(12.0));
-                ui.painter().rect_filled(caja, 6.0, FONDO.gamma_multiply(0.92));
-                ui.painter().galley(caja.min + Vec2::splat(6.0), galeria, TEXTO);
+                let margen = Vec2::new(7.0, 3.0);
+                let tam = galeria.size() + margen * 2.0;
+                let caja = Rect::from_min_size(area.right_bottom() - tam, tam);
+                ui.painter().rect_filled(caja, egui::CornerRadius { nw: 6, ..Default::default() }, FONDO.gamma_multiply(0.92));
+                ui.painter().galley(caja.min + margen, galeria, TEXTO);
                 ctx.request_repaint_after(Duration::from_millis(200));
             }
 

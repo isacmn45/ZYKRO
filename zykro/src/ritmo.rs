@@ -200,7 +200,6 @@ thread_local! {
     static APLAZADO: Cell<bool> = const { Cell::new(false) };
     static ESPERAR_VIDEO: Cell<bool> = const { Cell::new(true) };
     static RAFAGA: Cell<bool> = const { Cell::new(false) };
-    static FLUIDA: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Empieza a seguir los cuadros de la ventana (solo la primera vez). Devuelve `false` si no se
@@ -260,22 +259,16 @@ pub fn libre() -> bool {
     RITMO.with_borrow_mut(|r| r.as_mut().is_none_or(|r| r.visto(r.serie, r.enviado)))
 }
 
-/// El siguiente cuadro de video puede salir ya: no tiene que esperar (ver `fluida` y `rafaga`), o KWin
-/// ya tomó el anterior (así no lo tapa).
+/// El siguiente cuadro de video puede salir ya: no viene en ráfaga detrás del anterior, o KWin ya
+/// tomó el anterior (así no lo tapa).
 pub fn video_libre() -> bool {
-    !(FLUIDA.get() || RAFAGA.get()) || !ESPERAR_VIDEO.get() || RITMO.with_borrow_mut(|r| r.as_mut().is_none_or(|r| r.visto(r.serie_video, r.enviado_video)))
-}
-
-/// Imagen fluida (ajuste): cada cuadro de video espera a que KWin tome el anterior, uno por refresco.
-/// Free Fire entrega los cuadros cada 6 a 28 ms (lo que tarda su GPU en cada uno, no ZYKRO): sin
-/// esperar salen apenas llegan pero 3–5 por segundo se tapan o se repiten; esperando casi no hay
-/// tirones, pero la imagen va 4–8 ms más atrasada en promedio (medido en el entrenamiento).
-pub fn fluida(si: bool) {
-    FLUIDA.set(si);
+    !RAFAGA.get() || !ESPERAR_VIDEO.get() || RITMO.with_borrow_mut(|r| r.as_mut().is_none_or(|r| r.visto(r.serie_video, r.enviado_video)))
 }
 
 /// Llegaron dos cuadros de Android juntos (quedó otro en la cola al mostrar uno): el siguiente
-/// espera a que KWin tome el que se acaba de mostrar, aunque la imagen fluida esté apagada.
+/// espera a que KWin tome el que se acaba de mostrar. Los cuadros sueltos salen apenas llegan: si
+/// todos esperaran el aviso de KWin, la imagen iría 4–8 ms más atrasada (se probó como opción, «imagen
+/// más fluida», y se sintió pesada; con la GPU sin bajar de velocidad tampoco quitaba tirones).
 pub fn rafaga(hay: bool) {
     if hay && !RAFAGA.get() {
         RITMO.with_borrow_mut(|r| {
