@@ -242,18 +242,22 @@ impl Ajustes {
         if gpu.fabricante == Fabricante::Nvidia {
             nota(ui, "Con el driver propietario de NVIDIA, ZYKRO todavía no puede mostrar la imagen de Android (SwagPlayer usa otro camino para NVIDIA).");
         }
-        if self.borrador.modo != Modo::Ultra || !rendimiento::gpu_ajustable() || rendimiento::gpu_permitida() {
+        if !rendimiento::gpu_ajustable(self.borrador.modo) || rendimiento::gpu_permitida() {
             return;
         }
         ui.horizontal(|ui| {
-            nota(ui, "Para que Ultra fije la velocidad de la GPU hace falta tu permiso (una sola vez).");
+            nota(ui, "Para que la GPU no baje tanto de velocidad (si baja, los juegos dan tirones) hace falta tu permiso, una sola vez.");
             let pidiendo = self.pidiendo_permiso.load(Ordering::Relaxed);
             let texto = if pidiendo { "Esperando…" } else { "Dar permiso" };
             if ui.add_enabled(!pidiendo, egui::Button::new(texto)).clicked() {
                 let (pidiendo, ctx) = (self.pidiendo_permiso.clone(), ui.ctx().clone());
+                // El modo que ya está activo: si se guarda otro, al guardar se aplica el nuevo.
+                let modo = self.original.modo;
                 pidiendo.store(true, Ordering::Relaxed);
                 std::thread::spawn(move || {
-                    rendimiento::pedir_permiso_gpu();
+                    if rendimiento::pedir_permiso_gpu() {
+                        rendimiento::aplicar_gpu(modo);
+                    }
                     pidiendo.store(false, Ordering::Relaxed);
                     ctx.request_repaint();
                 });

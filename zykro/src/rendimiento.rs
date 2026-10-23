@@ -39,8 +39,8 @@ impl Modo {
     pub fn descripcion(self) -> &'static str {
         match self {
             Modo::Ahorro => "Menos calor y más batería. Android usa la mitad de los núcleos.",
-            Modo::Equilibrado => "Lo normal del sistema. Bueno para la mayoría de los juegos.",
-            Modo::Rendimiento => "El procesador y el ventilador van más fuertes; Android tiene prioridad.",
+            Modo::Equilibrado => "Lo normal, pero la GPU no baja de la mitad de su velocidad (evita tirones).",
+            Modo::Rendimiento => "CPU y ventilador más fuertes, Android con prioridad; GPU a 3/4 como mínimo.",
             Modo::Ultra => "Todo al máximo: además la GPU no baja nunca de velocidad.",
         }
     }
@@ -94,11 +94,51 @@ pub struct Gpu {
     pub tarjeta: PathBuf,
 }
 
-/// Archivo que fija la velocidad mínima de la GPU y los valores para Ultra y para lo normal.
+/// Archivo que fija la velocidad mínima de la GPU.
 struct ControlGpu {
     archivo: PathBuf,
-    ultra: String,
-    normal: String,
+    tipo: TipoGpu,
+}
+
+enum TipoGpu {
+    /// Velocidades en MHz: la mínima del sistema y la máxima.
+    Intel { minima: u32, maxima: u32 },
+    /// `power_dpm_force_performance_level`: "high" o "auto".
+    Amd,
+}
+
+impl ControlGpu {
+    /// Qué escribir con cada modo. En Intel, con la velocidad que el sistema elige sola, Free Fire
+    /// tardaba de 6 a 29 ms por cuadro (la GPU saltaba entre 100 y 650 MHz) y se veía a tirones aunque
+    /// marcara 60 FPS; con un mínimo de 600 MHz o más, cada cuadro llega a los 16–17 ms. Sin trabajo la
+    /// GPU igual se apaga (RC6), así que el mínimo casi no gasta en reposo.
+    fn valor(&self, modo: Modo) -> String {
+        match self.tipo {
+            TipoGpu::Intel { minima, maxima } => {
+                let piso = match modo {
+                    Modo::Ahorro => minima,
+                    Modo::Equilibrado => maxima / 2,
+                    Modo::Rendimiento => maxima * 3 / 4,
+                    Modo::Ultra => maxima,
+                };
+                piso.max(minima).to_string()
+            }
+            TipoGpu::Amd => if modo == Modo::Ultra { "high" } else { "auto" }.into(),
+        }
+    }
+
+    /// Lo que el sistema tenía antes de ZYKRO.
+    fn normal(&self) -> String {
+        match self.tipo {
+            TipoGpu::Intel { minima, .. } => minima.to_string(),
+            TipoGpu::Amd => "auto".into(),
+        }
+    }
+
+    /// El modo cambia la velocidad mínima (si no, se deja la del sistema).
+    fn ajusta(&self, modo: Modo) -> bool {
+        self.valor(modo) != self.normal()
+    }
 }
 
 pub fn gpu() -> Option<Gpu> {
@@ -147,33 +187,31 @@ fn detectar_gpu() -> Option<Gpu> {
 
 fn control_gpu() -> Option<ControlGpu> {
     let g = gpu()?;
-    let leer = |p: &Path| std::fs::read_to_string(p).ok().map(|s| s.trim().to_string());
+    let leer = |p: &Path| std::fs::read_to_string(p).ok().and_then(|s| s.trim().parse::<u32>().ok());
     match g.fabricante {
         Fabricante::Intel => {
             // i915 (Iris, UHD, Arc antiguas) o xe (Arc nuevas).
             let i915 = g.tarjeta.join("gt_min_freq_mhz");
             if i915.exists() {
-                return Some(ControlGpu {
-                    ultra: leer(&g.tarjeta.join("gt_RP0_freq_mhz"))?,
-                    normal: leer(&g.tarjeta.join("gt_RPn_freq_mhz"))?,
-                    archivo: i915,
-                });
+                let (minima, maxima) = (leer(&g.tarjeta.join("gt_RPn_freq_mhz"))?, leer(&g.tarjeta.join("gt_RP0_freq_mhz"))?);
+                return Some(ControlGpu { archivo: i915, tipo: TipoGpu::Intel { minima, maxima } });
             }
             let xe = g.tarjeta.join("device/tile0/gt0/freq0");
-            Some(ControlGpu { ultra: leer(&xe.join("rp0_freq"))?, normal: leer(&xe.join("rpn_freq"))?, archivo: xe.join("min_freq") })
+            let (minima, maxima) = (leer(&xe.join("rpn_freq"))?, leer(&xe.join("rp0_freq"))?);
+            Some(ControlGpu { archivo: xe.join("min_freq"), tipo: TipoGpu::Intel { minima, maxima } })
         }
         Fabricante::Amd => {
             let archivo = g.tarjeta.join("device/power_dpm_force_performance_level");
-            archivo.exists().then(|| ControlGpu { archivo, ultra: "high".into(), normal: "auto".into() })
+            archivo.exists().then_some(ControlGpu { archivo, tipo: TipoGpu::Amd })
         }
         // NVIDIA: lo maneja su driver propietario; no se toca.
         _ => None,
     }
 }
 
-/// Hay algo que ajustar en la GPU (Intel o AMD).
-pub fn gpu_ajustable() -> bool {
-    control_gpu().is_some()
+/// El modo ajusta la velocidad de la GPU (Intel: todos menos Ahorro; AMD: solo Ultra).
+pub fn gpu_ajustable(modo: Modo) -> bool {
+    control_gpu().is_some_and(|c| c.ajusta(modo))
 }
 
 /// ZYKRO ya puede ajustar la GPU sin contraseña.
@@ -189,7 +227,7 @@ fn escribible(ruta: &Path) -> bool {
 /// Regla udev que da a `usuario` los archivos de velocidad de la GPU (i915, xe y AMD).
 fn regla_gpu(usuario: &str) -> String {
     format!(
-        "# ZYKRO: deja a {usuario} ajustar la velocidad mínima de la GPU (modo Ultra rendimiento).\n\
+        "# ZYKRO: deja a {usuario} ajustar la velocidad mínima de la GPU (para que no dé tirones).\n\
          SUBSYSTEM==\"drm\", ENV{{DEVTYPE}}==\"drm_minor\", KERNEL==\"card*\", ACTION==\"add|change\", \
          RUN+=\"/bin/sh -c 'for f in gt_min_freq_mhz device/tile0/gt0/freq0/min_freq device/power_dpm_force_performance_level; \
          do [ -e /sys%p/$$f ] && chown {usuario} /sys%p/$$f; done'\"\n"
@@ -243,9 +281,14 @@ fn cpu_android(nucleos: usize, prioridad: u32) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-fn poner_gpu(ultra: bool) -> bool {
+fn poner_gpu(modo: Option<Modo>) -> bool {
     let Some(c) = control_gpu() else { return false };
-    std::fs::write(&c.archivo, if ultra { &c.ultra } else { &c.normal }).is_ok()
+    std::fs::write(&c.archivo, modo.map_or_else(|| c.normal(), |m| c.valor(m))).is_ok()
+}
+
+/// Pone la velocidad mínima de la GPU de ese modo (al recibir el permiso, sin volver a aplicar todo).
+pub fn aplicar_gpu(modo: Modo) -> bool {
+    gpu_permitida() && poner_gpu(Some(modo))
 }
 
 /// Aplica el modo. Devuelve un aviso con lo que no se pudo hacer (vacío si salió todo).
@@ -260,7 +303,7 @@ pub fn aplicar(modo: Modo) -> Vec<&'static str> {
     }
     if control_gpu().is_some() {
         if gpu_permitida() {
-            poner_gpu(modo == Modo::Ultra);
+            poner_gpu(Some(modo));
         } else if modo == Modo::Ultra {
             fallos.push("falta el permiso para ajustar la GPU (Configuración → Rendimiento)");
         }
@@ -275,7 +318,7 @@ pub fn restaurar() {
     }
     cpu_android(Modo::Equilibrado.nucleos(), Modo::Equilibrado.prioridad());
     if gpu_permitida() {
-        poner_gpu(false);
+        poner_gpu(None);
     }
 }
 
@@ -301,13 +344,16 @@ mod pruebas {
         let g = gpu().expect("sin GPU");
         println!("GPU: {} integrada={} tarjeta={}", g.nombre, g.integrada, g.tarjeta.display());
         let c = control_gpu();
-        println!("ajustable={} permitida={} control={:?}", gpu_ajustable(), gpu_permitida(), c.map(|c| (c.archivo, c.ultra, c.normal)));
+        println!("permitida={} archivo={:?}", gpu_permitida(), c.as_ref().map(|c| &c.archivo));
+        for modo in Modo::TODOS {
+            println!("  {}: {:?}", modo.nombre(), c.as_ref().map(|c| c.valor(modo)));
+        }
         let antes = perfil_actual();
         println!("perfil antes: {antes:?}");
         println!("aplicar Ahorro: {:?}", aplicar(Modo::Ahorro));
         let cpu = Command::new("docker").args(["inspect", "-f", "{{.HostConfig.NanoCpus}} {{.HostConfig.CpuShares}}", CONTENEDOR]).output().unwrap();
         println!("perfil ahora: {:?}, docker: {}", perfil_actual(), String::from_utf8_lossy(&cpu.stdout).trim());
-        println!("aplicar Ultra (sin permiso de GPU): {:?}", aplicar(Modo::Ultra));
+        println!("aplicar Ultra: {:?}", aplicar(Modo::Ultra));
         restaurar();
         let cpu = Command::new("docker").args(["inspect", "-f", "{{.HostConfig.NanoCpus}} {{.HostConfig.CpuShares}}", CONTENEDOR]).output().unwrap();
         println!("restaurado: perfil {:?}, docker: {}", perfil_actual(), String::from_utf8_lossy(&cpu.stdout).trim());
