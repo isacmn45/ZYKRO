@@ -33,7 +33,9 @@ const RESOLUCIONES: [(u32, u32, &str); 6] = [
     (720, 1280, "720 × 1280 (teléfono)"),
     (1080, 1920, "1080 × 1920 (teléfono)"),
 ];
-const DPIS: [(u32, &str); 4] = [(160, "160 (pequeño)"), (240, "240 (normal)"), (320, "320 (grande)"), (480, "480 (muy grande)")];
+/// 360 en 1920×1080 deja a Android del mismo tamaño que BlueStacks (1280×720 a 240), pero más nítido.
+const DPIS: [(u32, &str); 5] =
+    [(160, "160 (pequeño)"), (240, "240 (normal)"), (320, "320 (grande)"), (360, "360 (como BlueStacks)"), (480, "480 (muy grande)")];
 const FPS: [u32; 4] = [30, 60, 90, 120];
 /// Tamaño fijo de la ventana de configuración (el contenido se desplaza si no cabe).
 const ANCHO_PESTANAS: f32 = 170.0;

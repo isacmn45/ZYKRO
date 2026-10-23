@@ -404,11 +404,13 @@ const ID_ARRASTRE: u64 = 4;
 const ID_NODO: u64 = 100;
 /// Bit de `tweaks`: la posición se calcula desde el ancla con el total acumulado y la curva en X.
 const MODO_ABSOLUTO: u32 = 0x4000;
-/// `touchIdleTimeoutMs` cuando vale 0, como SwagPlayer.
-const ESPERA_POR_DEFECTO: Duration = Duration::from_millis(2000);
-
-/// Dedo de la cámara, como SwagPlayer: se baja en `startPos` y cada movimiento recalcula la posición
-/// desde ahí con todo lo que se movió el mouse.
+/// Alto de la imagen de BlueStacks maximizado en una pantalla de 1920×1080. BlueStacks mide el
+/// movimiento del mouse en píxeles de su ventana y lo pasa a porcentaje de la pantalla de Android:
+/// con este tamaño fijo la cámara va como allá, sin depender de la resolución de Android ni del
+/// tamaño de la ventana de ZYKRO (en BlueStacks va más lenta cuanto más grande es la ventana).
+const ALTO_BLUESTACKS: f64 = 1000.0;
+/// Dedo de la cámara, como BlueStacks: se baja en `startPos`, cada movimiento recalcula la posición
+/// desde ahí con todo lo que se movió el mouse y queda puesto mientras dure la puntería.
 struct Apunte {
     /// Donde se bajó el dedo, en píxeles de Android.
     ancla: (f64, f64),
@@ -416,8 +418,6 @@ struct Apunte {
     acumulado: (f64, f64),
     /// Último punto mandado.
     punto: (i32, i32),
-    /// Último movimiento, para levantar el dedo tras `touchIdleTimeoutMs`.
-    ultimo: Instant,
 }
 
 /// Toque programado (doble toque, varios toques, deslizar).
@@ -471,13 +471,6 @@ impl Motor {
     pub fn mover_directo(&mut self, delta: Vec2) {
         if let Some((c, w, h)) = self.salida.clone() {
             self.mover(delta, &c, w, h);
-        }
-    }
-
-    /// Levanta el dedo de la cámara si el mouse lleva quieto `touchIdleTimeoutMs` (hilo de raton.rs).
-    pub fn revisar_quieto_directo(&mut self) {
-        if let Some((c, w, h)) = self.salida.clone() {
-            self.revisar_quieto(&c, w, h);
         }
     }
 
@@ -641,15 +634,21 @@ impl Motor {
         self.tecla(nombre, presionado, false, ctl, w, h)
     }
 
-    /// Movimiento del mouse en modo puntería, con la fórmula de SwagPlayer (`delta` en cuentas crudas):
+    /// Movimiento del mouse en modo puntería, con la fórmula de BlueStacks (`delta` en cuentas crudas;
+    /// detalles en docs/investigacion.md, «Cámara de BlueStacks»):
     ///
     /// ```text
-    /// x = ancla_x + S(sensX · acumulado_x)      S = curva::horizontal (sin MODO_ABSOLUTO, lineal)
-    /// y = ancla_y + sensX · ratioY · acumulado_y
+    /// x = ancla_x + S(sensX · acumulado_x) / ancho_bs · W      S = curva::horizontal (sin MODO_ABSOLUTO, lineal)
+    /// y = ancla_y + sensX · ratioY · acumulado_y / ALTO_BLUESTACKS · H
     /// ```
     ///
+    /// SwagPlayer copió esta fórmula pero toma el resultado como píxeles de Android; BlueStacks, como
+    /// píxeles de su ventana (`ancho_bs` × `ALTO_BLUESTACKS`, con la forma de la pantalla de Android).
+    ///
     /// No recorta a la pantalla ni recentra mientras se mueve: el dedo puede salirse y Android lo
-    /// sigue aceptando. Solo se levanta tras `touchIdleTimeoutMs` quieto (`revisar_quieto`).
+    /// sigue aceptando. Como en BlueStacks, el dedo no se levanta aunque el mouse se quede quieto
+    /// (SwagPlayer lo levantaba tras `touchIdleTimeoutMs`, que aquí se ignora): solo al salir de la
+    /// puntería o al soltar el mapeo.
     pub fn mover(&mut self, delta: Vec2, ctl: &Control, w: f32, h: f32) {
         let Some(r) = self.mapa.as_ref().and_then(|m| m.raton.clone()) else { return };
         if !self.cursor_bloqueado() || delta == Vec2::ZERO {
@@ -659,43 +658,28 @@ impl Motor {
             let ancla = (r.inicio.x as f64 * w as f64, r.inicio.y as f64 * h as f64);
             let punto = (ancla.0 as i32, ancla.1 as i32);
             ctl.toque(BAJAR, ID_APUNTAR, punto.0, punto.1, w as u16, h as u16);
-            Apunte { ancla, acumulado: (0.0, 0.0), punto, ultimo: Instant::now() }
+            Apunte { ancla, acumulado: (0.0, 0.0), punto }
         });
         apunte.acumulado.0 += delta.x as f64;
         apunte.acumulado.1 += delta.y as f64;
-        apunte.ultimo = Instant::now();
         let (sens_x, sens_y) = (r.sens as f64, r.sens as f64 * r.ratio_y as f64);
         let dx = if r.tweaks & MODO_ABSOLUTO != 0 {
             curva::horizontal(sens_x * apunte.acumulado.0)
         } else {
             sens_x * apunte.acumulado.0
         };
-        // Se trunca igual que SwagPlayer (hacia cero).
-        let punto = ((apunte.ancla.0 + dx) as i32, (apunte.ancla.1 + sens_y * apunte.acumulado.1) as i32);
+        let dy = sens_y * apunte.acumulado.1;
+        // De píxeles de la ventana de BlueStacks a píxeles de Android.
+        let ancho_bs = ALTO_BLUESTACKS * w as f64 / h as f64;
+        let (dx, dy) = (dx / ancho_bs * w as f64, dy / ALTO_BLUESTACKS * h as f64);
+        // Se trunca hacia cero, como SwagPlayer.
+        let punto = ((apunte.ancla.0 + dx) as i32, (apunte.ancla.1 + dy) as i32);
         apunte.punto = punto;
         ctl.toque(MOVER, ID_APUNTAR, punto.0, punto.1, w as u16, h as u16);
         self.activos.insert(ID_APUNTAR, punto);
     }
 
-    /// Como SwagPlayer: tras `touchIdleTimeoutMs` sin mover el mouse se levanta el dedo de la cámara.
-    /// El siguiente movimiento lo vuelve a bajar en `startPos` con el acumulado en 0.
-    fn revisar_quieto(&mut self, ctl: &Control, w: f32, h: f32) {
-        if self.espera_quieto() == Some(Duration::ZERO) {
-            if let Some(a) = self.apunte.take() {
-                self.tocar(ctl, SOLTAR, ID_APUNTAR, a.punto.0, a.punto.1, w, h);
-            }
-        }
-    }
-
-    /// Cuánto falta para levantar el dedo de la cámara por estar quieto (`None` si no está abajo).
-    pub fn espera_quieto(&self) -> Option<Duration> {
-        let a = self.apunte.as_ref()?;
-        let ms = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).map_or(0, |r| r.espera_ms);
-        let espera = if ms == 0 { ESPERA_POR_DEFECTO } else { Duration::from_millis(ms) };
-        Some(espera.saturating_sub(a.ultimo.elapsed()))
-    }
-
-    /// Temporizadores: toques programados y soltar el dedo de la cámara si el mouse se quedó quieto.
+    /// Temporizador de los toques programados.
     pub fn tick(&mut self, ctl: &Control, w: f32, h: f32) {
         let ahora = Instant::now();
         let (listos, faltan): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pendientes).into_iter().partition(|p| p.cuando <= ahora);
@@ -703,7 +687,6 @@ impl Motor {
         for p in listos {
             self.tocar(ctl, p.accion, p.dedo, p.x, p.y, w, h);
         }
-        self.revisar_quieto(ctl, w, h);
     }
 
     /// Hay algo pendiente que necesita que la interfaz siga refrescando.
@@ -756,10 +739,10 @@ impl Motor {
 mod pruebas {
     use super::*;
 
-    /// La puntería manda lo mismo que SwagPlayer: bajar en `startPos` y luego la posición calculada
+    /// La puntería manda lo mismo que BlueStacks: bajar en `startPos` y luego la posición calculada
     /// desde el ancla con el total acumulado (curva en X, lineal en Y), un toque por movimiento.
     #[test]
-    fn punteria_como_swagplayer() {
+    fn punteria_como_bluestacks() {
         use std::io::Read;
         use std::os::unix::net::UnixListener;
 
@@ -792,9 +775,9 @@ mod pruebas {
                 (m[1], i32_en(10), i32_en(14))
             })
             .collect();
-        // Calculado aparte en Python con el spline de SwagPlayer: x = 1015.9 + S(1.35·acum_x),
-        // y = 352.8 + 1.5525·acum_y, acumulando (10, 0), (10, 10) y (−390, 13).
-        assert_eq!(toques, vec![(BAJAR, 1015, 352), (MOVER, 1028, 352), (MOVER, 1028, 368), (MOVER, 792, 372)]);
+        // Calculado aparte en Python con el spline: x = 1015.9 + S(1.35·acum_x) · 1280/1777.8,
+        // y = 352.8 + 1.5525·acum_y · 720/1000, acumulando (10, 0), (10, 10) y (−390, 13).
+        assert_eq!(toques, vec![(BAJAR, 1015, 352), (MOVER, 1024, 352), (MOVER, 1024, 363), (MOVER, 855, 367)]);
     }
 
     /// Lee el mapeo de Free Fire de SwagPlayer y comprueba que al volver a guardarlo no se pierde

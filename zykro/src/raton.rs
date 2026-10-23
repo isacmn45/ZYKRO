@@ -22,8 +22,6 @@ const EV_REL: u16 = 2;
 const REL_X: u16 = 0;
 const REL_Y: u16 = 1;
 const TAM_EVENTO: usize = 24; // struct input_event en 64 bits
-/// Cada cuánto se mira si el mouse lleva quieto `touchIdleTimeoutMs` (como el tick de 16 ms de SwagPlayer).
-const REVISION: Duration = Duration::from_millis(16);
 
 /// `activo`: la ventana lo prende mientras la puntería está activa con el cursor bloqueado.
 /// `listo`: el hilo lo prende si pudo abrir algún mouse (si no, la ventana usa sus propios eventos).
@@ -42,13 +40,11 @@ pub fn iniciar(motor: Arc<Mutex<Motor>>, activo: Arc<AtomicBool>, listo: Arc<Ato
             let mut pendiente = vec![Vec2::ZERO; ratones.len()];
             let mut botones: Vec<Vec<(PointerButton, bool)>> = vec![Vec::new(); ratones.len()];
             let mut buf = [0u8; TAM_EVENTO * 64];
-            let mut ultima_revision = Instant::now();
             while Instant::now() < revisar {
                 let apuntando = activo.load(Ordering::Relaxed);
-                let espera = if apuntando { REVISION.as_millis() as u16 } else { 200 };
                 let listos: Vec<bool> = {
                     let mut fds: Vec<PollFd> = ratones.iter().map(|f| PollFd::new(f.as_fd(), PollFlags::POLLIN)).collect();
-                    if poll(&mut fds, PollTimeout::from(espera)).is_err() {
+                    if poll(&mut fds, PollTimeout::from(200u8)).is_err() {
                         break;
                     }
                     fds.iter().map(|f| f.revents().is_some_and(|r| r.contains(PollFlags::POLLIN))).collect()
@@ -87,10 +83,6 @@ pub fn iniciar(motor: Arc<Mutex<Motor>>, activo: Arc<AtomicBool>, listo: Arc<Ato
                             _ => {}
                         }
                     }
-                }
-                if apuntando && ultima_revision.elapsed() >= REVISION {
-                    motor.lock().unwrap().revisar_quieto_directo();
-                    ultima_revision = Instant::now();
                 }
             }
             ratones.clear();
