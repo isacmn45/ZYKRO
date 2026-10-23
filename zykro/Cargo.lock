@@ -3046,6 +3046,10 @@ dependencies = [
  "memmap2",
  "nix",
  "png",
+ "raw-window-handle",
  "serde",
  "serde_json",
+ "wayland-backend",
+ "wayland-client",
+ "winit",
 ]

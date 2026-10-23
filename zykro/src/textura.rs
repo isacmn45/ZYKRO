@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use eframe::egui::{self, TextureId, TextureOptions};
@@ -204,6 +204,29 @@ unsafe fn cargar_egl() -> Option<Egl> {
         asignar: std::mem::transmute(funcion(c"glEGLImageTargetTexture2DOES")?),
         modificadores: tiene("EGL_EXT_image_dma_buf_import_modifiers"),
     })
+}
+
+/// Quita el vsync de la ventana (una sola vez): el ritmo de los cuadros lo lleva `ritmo.rs`.
+pub fn quitar_vsync() {
+    type Actual = unsafe extern "C" fn() -> Ptr;
+    type Intervalo = unsafe extern "C" fn(Ptr, i32) -> u32;
+    static QUITADO: AtomicBool = AtomicBool::new(false);
+    if QUITADO.load(Ordering::Relaxed) {
+        return;
+    }
+    let funciones = unsafe {
+        let lib = libc::dlopen(c"libEGL.so.1".as_ptr(), libc::RTLD_NOW);
+        if lib.is_null() {
+            return;
+        }
+        no_nulo(libc::dlsym(lib, c"eglGetCurrentDisplay".as_ptr())).zip(no_nulo(libc::dlsym(lib, c"eglSwapInterval".as_ptr())))
+    };
+    let Some((actual, poner)) = funciones else { return };
+    let (actual, poner) = unsafe { (std::mem::transmute::<Ptr, Actual>(actual), std::mem::transmute::<Ptr, Intervalo>(poner)) };
+    let display = unsafe { actual() };
+    if !display.is_null() && unsafe { poner(display, 0) } != 0 {
+        QUITADO.store(true, Ordering::Relaxed);
+    }
 }
 
 fn no_nulo(p: Ptr) -> Option<Ptr> {

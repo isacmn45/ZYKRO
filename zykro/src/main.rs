@@ -15,6 +15,7 @@ mod menu;
 mod raton;
 mod recientes;
 mod rendimiento;
+mod ritmo;
 mod rueda;
 mod sensores;
 mod textura;
@@ -34,6 +35,10 @@ use eframe::egui::{
 use egui_phosphor::regular as ic;
 
 use control::{Control, BAJAR, META_ALT, META_CTRL, META_SHIFT, MOVER, SOLTAR};
+use winit::application::ApplicationHandler;
+use winit::event::{DeviceEvent, DeviceId, StartCause, WindowEvent};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::window::WindowId;
 
 const NOMBRE: &str = "ZYKRO";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -68,6 +73,7 @@ const APLICAR_ANDROID: &str = "--aplicar-android";
 const ICONO_PNG: &[u8] = include_bytes!("../assets/icono.png");
 
 fn main() -> eframe::Result {
+    registrar_en_archivo();
     let opciones = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(NOMBRE)
@@ -81,7 +87,108 @@ fn main() -> eframe::Result {
             }),
         ..Default::default()
     };
-    eframe::run_native(NOMBRE, opciones, Box::new(|cc| Ok(Box::new(Zykro::new(cc)))))
+    let bucle = EventLoop::<eframe::UserEvent>::with_user_event().build().map_err(eframe::Error::WinitEventLoop)?;
+    let app = eframe::create_native(NOMBRE, opciones, Box::new(|cc| Ok(Box::new(Zykro::new(cc)))), &bucle);
+    let mut ventana = Ventana { app, id: None, urgente: false };
+    bucle.run_app(&mut ventana).map_err(eframe::Error::WinitEventLoop)
+}
+
+/// El bucle de eframe, con dos cambios:
+/// - Sin el movimiento crudo del mouse mientras raton.rs manda la puntería directo a Android: con él,
+///   egui se redibujaba con cada reporte (1000 por segundo con un mouse gamer). En Wayland winit no
+///   deja apagar esos eventos.
+/// - Los redibujos que no traen video ni una tecla o clic esperan a que KWin tome el cuadro anterior
+///   (ver ritmo.rs): sin vsync, si no, la ventana se redibujaría sin parar al mover el mouse.
+struct Ventana<'a> {
+    app: eframe::EframeWinitApplication<'a>,
+    id: Option<WindowId>,
+    /// Llegó una tecla o un clic desde el último cuadro: se dibuja ya, sin esperar a KWin.
+    urgente: bool,
+}
+
+/// Se puede dibujar ya: KWin tomó el último cuadro, o hay video nuevo y ya tomó el video anterior.
+fn puede_dibujar() -> bool {
+    ritmo::libre() || (video::NUEVO.load(Ordering::Relaxed) && ritmo::video_libre())
+}
+
+impl ApplicationHandler<eframe::UserEvent> for Ventana<'_> {
+    fn resumed(&mut self, bucle: &ActiveEventLoop) {
+        self.app.resumed(bucle);
+    }
+
+    fn window_event(&mut self, bucle: &ActiveEventLoop, id: WindowId, evento: WindowEvent) {
+        self.id = Some(id);
+        match &evento {
+            WindowEvent::KeyboardInput { event, .. } if !event.repeat => self.urgente = true,
+            WindowEvent::MouseInput { .. } => self.urgente = true,
+            WindowEvent::Focused(enfocada) => {
+                eprintln!("[ventana] {:.3} {}", segundos(), if *enfocada { "con foco" } else { "sin foco" });
+                self.urgente = true;
+            }
+            WindowEvent::CursorEntered { .. } => eprintln!("[ventana] {:.3} entra el puntero", segundos()),
+            WindowEvent::CursorLeft { .. } => eprintln!("[ventana] {:.3} sale el puntero", segundos()),
+            WindowEvent::RedrawRequested => {
+                if !self.urgente && !puede_dibujar() {
+                    ritmo::aplazar();
+                    return;
+                }
+                self.urgente = false;
+                ritmo::tomar_aplazado();
+            }
+            _ => {}
+        }
+        self.app.window_event(bucle, id, evento);
+    }
+
+    fn new_events(&mut self, bucle: &ActiveEventLoop, causa: StartCause) {
+        self.app.new_events(bucle, causa);
+    }
+
+    fn user_event(&mut self, bucle: &ActiveEventLoop, evento: eframe::UserEvent) {
+        self.app.user_event(bucle, evento);
+    }
+
+    fn device_event(&mut self, bucle: &ActiveEventLoop, id: DeviceId, evento: DeviceEvent) {
+        if matches!(evento, DeviceEvent::MouseMotion { .. }) && raton::DIRECTO.load(Ordering::Relaxed) {
+            return;
+        }
+        self.app.device_event(bucle, id, evento);
+    }
+
+    fn about_to_wait(&mut self, bucle: &ActiveEventLoop) {
+        if let Some(id) = self.id.filter(|_| ritmo::aplazado() && puede_dibujar()) {
+            ritmo::tomar_aplazado();
+            self.app.window_event(bucle, id, WindowEvent::RedrawRequested);
+        }
+        self.app.about_to_wait(bucle);
+        // Despertar a más tardar cuando venza la espera del aviso de KWin.
+        if let Some(limite) = ritmo::limite() {
+            let flujo = match bucle.control_flow() {
+                ControlFlow::WaitUntil(t) if t < limite => ControlFlow::WaitUntil(t),
+                ControlFlow::Poll => ControlFlow::Poll,
+                _ => ControlFlow::WaitUntil(limite),
+            };
+            bucle.set_control_flow(flujo);
+        }
+    }
+
+    fn suspended(&mut self, bucle: &ActiveEventLoop) {
+        self.app.suspended(bucle);
+    }
+
+    fn exiting(&mut self, bucle: &ActiveEventLoop) {
+        self.app.exiting(bucle);
+    }
+
+    fn memory_warning(&mut self, bucle: &ActiveEventLoop) {
+        self.app.memory_warning(bucle);
+    }
+}
+
+/// Segundos desde que abrió ZYKRO, para el registro.
+fn segundos() -> f64 {
+    static INICIO: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    INICIO.get_or_init(Instant::now).elapsed().as_secs_f64()
 }
 
 struct Zykro {
@@ -186,6 +293,7 @@ impl Zykro {
         android::vigilar_texto(cc.egui_ctx.clone(), estado.clone());
         audio::iniciar();
         aplicar_modo(&estado, estado.lock().unwrap().config.modo, false);
+        ritmo::fluida(estado.lock().unwrap().config.imagen_fluida);
         let motor = Arc::new(Mutex::new(mapeo::Motor::new()));
         let raton_directo = Arc::new(AtomicBool::new(false));
         let raton_listo = Arc::new(AtomicBool::new(false));
@@ -239,6 +347,7 @@ impl Zykro {
 
     fn aplicar_config(&mut self, ctx: &egui::Context, nueva: config::Config) {
         nueva.guardar();
+        ritmo::fluida(nueva.imagen_fluida);
         let anterior = std::mem::replace(&mut self.estado.lock().unwrap().config, nueva.clone());
         if nueva.android != anterior.android {
             // ZYKRO se cierra y se vuelve a abrir, y la ventana nueva recrea Android: así la
@@ -536,13 +645,6 @@ impl Zykro {
         self.mapeo_activo = activo;
 
         let bloquear = activo && motor.cursor_bloqueado();
-        self.raton_directo.store(bloquear && self.raton_listo.load(Ordering::Relaxed), Ordering::Relaxed);
-        if bloquear != self.cursor_bloqueado {
-            let modo = if bloquear { egui::CursorGrab::Locked } else { egui::CursorGrab::None };
-            ctx.send_viewport_cmd(ViewportCommand::CursorGrab(modo));
-            ctx.send_viewport_cmd(ViewportCommand::CursorVisible(!bloquear));
-            self.cursor_bloqueado = bloquear;
-        }
         if motor.apuntando != self.apuntando_antes {
             self.apuntando_antes = motor.apuntando;
             let tecla = motor.mapa.as_ref().map(|m| mapeo::etiqueta(&m.cambio)).unwrap_or_default();
@@ -560,6 +662,22 @@ impl Zykro {
             if motor.ocupado() {
                 ctx.request_repaint_after(Duration::from_millis(8));
             }
+        }
+        drop(motor);
+        self.bloquear_cursor(ctx, bloquear);
+    }
+
+    /// Bloquea el cursor (y manda el mouse directo a Android) o lo suelta.
+    fn bloquear_cursor(&mut self, ctx: &egui::Context, bloquear: bool) {
+        let directo = bloquear && self.raton_listo.load(Ordering::Relaxed);
+        self.raton_directo.store(directo, Ordering::Relaxed);
+        raton::DIRECTO.store(directo, Ordering::Relaxed);
+        if bloquear != self.cursor_bloqueado {
+            eprintln!("[ventana] {:.3} cursor {}", segundos(), if bloquear { "bloqueado" } else { "libre" });
+            let modo = if bloquear { egui::CursorGrab::Locked } else { egui::CursorGrab::None };
+            ctx.send_viewport_cmd(ViewportCommand::CursorGrab(modo));
+            ctx.send_viewport_cmd(ViewportCommand::CursorVisible(!bloquear));
+            self.cursor_bloqueado = bloquear;
         }
     }
 
@@ -623,25 +741,43 @@ impl Zykro {
     }
 
     /// Sube a la GPU el cuadro nuevo, si llegó uno.
-    fn actualizar_textura(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        // Un cuadro por refresco, en orden; si queda otro en la cola, se muestra en el siguiente.
-        // Si eso dura medio segundo (cada cuadro sale un refresco tarde, ~17 ms), se salta uno para
-        // no arrastrar ese retraso.
+    /// Devuelve si se mostró un cuadro nuevo.
+    /// Muestra el siguiente cuadro de Android, si toca. Devuelve cuándo lo avisó el servidor y cuándo
+    /// quedó listo.
+    fn actualizar_textura(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) -> Option<(Instant, Instant)> {
+        // Cada cuadro sale apenas llega, salvo con la imagen fluida o si llegan dos juntos: entonces
+        // espera a que KWin tome el anterior (si no, lo taparía antes de salir en pantalla). Si los
+        // cuadros salen tarde medio segundo seguido (~17 ms cada uno), uno no espera (tapa al
+        // anterior) para no arrastrar ese retraso.
+        let atrasado = self.atrasados >= MAX_ATRASADOS;
+        let libre = atrasado || ritmo::video_libre();
         let (cuadro, quedan) = {
             let mut cola = self.video.lock().unwrap();
-            if cola.len() > 1 && self.atrasados >= MAX_ATRASADOS {
+            if !cola.is_empty() && !libre {
+                ritmo::aplazar();
+                return None;
+            }
+            if cola.len() > 1 && atrasado {
                 cola.pop_front();
             }
-            (cola.pop_front(), !cola.is_empty())
+            let cuadro = cola.pop_front();
+            video::NUEVO.store(!cola.is_empty(), Ordering::Relaxed);
+            (cuadro, !cola.is_empty())
         };
-        self.atrasados = if quedan { (self.atrasados + 1).min(MAX_ATRASADOS) } else { 0 };
-        let Some(mut cuadro) = cuadro else { return };
+        let mut cuadro = cuadro?;
+        // Sin esperar, un cuadro se dibuja ~0.2 ms después de llegar.
+        let tarde = quedan || cuadro.llegada.elapsed() > Duration::from_millis(2);
+        self.atrasados = if tarde && !atrasado { self.atrasados + 1 } else { 0 };
+        ritmo::esperar_video(self.atrasados < MAX_ATRASADOS);
+        ritmo::rafaga(quedan);
         if quedan {
-            ctx.request_repaint();
+            ritmo::aplazar();
         }
         self.pantalla.mostrar(ctx, frame, &mut cuadro);
+        let tiempos = (cuadro.recibido, cuadro.llegada);
         self.cuadro = Some(cuadro);
         self.cuadros_seg += 1;
+        Some(tiempos)
     }
 
     fn contar_fps(&mut self) {
@@ -804,7 +940,7 @@ impl Zykro {
                     desde: s.etapa_desde,
                     mensaje: s.mensaje.clone(),
                     error: s.error,
-                    sobre_video: self.pantalla.id().is_some(),
+                    sobre_video: self.cuadro.is_some(),
                     logo: self.logo.id(),
                 };
                 (w as f32, h as f32, carga, aviso)
@@ -840,7 +976,7 @@ impl Zykro {
                 ui.painter().rect_filled(caja, 12.0, FONDO.gamma_multiply(0.92));
                 ui.painter().galley(caja.center() - galeria.size() / 2.0, galeria, TEXTO);
             }
-            if self.pantalla.id().is_none() || !carga.mensaje.is_empty() {
+            if self.cuadro.is_none() || !carga.mensaje.is_empty() {
                 carga::dibujar(ui, area, &carga);
                 ctx.request_repaint_after(Duration::from_millis(16));
             }
@@ -984,7 +1120,11 @@ impl eframe::App for Zykro {
                 m.surrender_focus(id);
             }
         });
-        self.actualizar_textura(ctx, frame);
+        if ritmo::iniciar(frame) {
+            textura::quitar_vsync();
+        }
+        let tiempos = self.actualizar_textura(ctx, frame);
+        ritmo::enviar(tiempos);
         self.contar_fps();
 
         let pantalla_completa = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
@@ -1000,6 +1140,9 @@ impl eframe::App for Zykro {
             }
         }
         self.pantalla(ui, en_borde);
+        // Si una tecla acaba de prender o apagar la puntería, el cursor cambia ya, no en el próximo cuadro.
+        let bloquear = self.mapeo_activo && self.motor().cursor_bloqueado();
+        self.bloquear_cursor(ctx, bloquear);
         let salida = {
             let mut motor = self.motor.lock().unwrap();
             self.menu.mostrar(ctx, motor.mapa.as_mut())
@@ -1126,6 +1269,7 @@ fn aplicar_modo(estado: &android::EstadoCompartido, modo: rendimiento::Modo, avi
 
 fn alternar_pantalla_completa(ctx: &egui::Context) {
     let actual = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+    eprintln!("[ventana] {:.3} pantalla completa: {}", segundos(), if actual { "sale" } else { "entra" });
     ctx.send_viewport_cmd(ViewportCommand::Fullscreen(!actual));
 }
 
@@ -1158,6 +1302,23 @@ fn cambiar_tamano(ctx: &egui::Context) -> (bool, Option<(ResizeDirection, Cursor
     ctx.set_cursor_icon(cursor);
     let tomada = ctx.input(|i| i.pointer.primary_pressed()).then_some((dir, cursor));
     (true, tomada)
+}
+
+/// Abierto desde el ícono, los mensajes de ZYKRO se perderían: van a ~/.cache/zykro/registro.log
+/// (uno por sesión). Desde una terminal se siguen viendo ahí.
+fn registrar_en_archivo() {
+    use std::os::fd::AsRawFd;
+    if unsafe { libc::isatty(2) } == 1 {
+        return;
+    }
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".cache"));
+    let carpeta = base.join("zykro");
+    let _ = std::fs::create_dir_all(&carpeta);
+    if let Ok(archivo) = std::fs::File::create(carpeta.join("registro.log")) {
+        unsafe { libc::dup2(archivo.as_raw_fd(), 2) };
+    }
 }
 
 /// Abre otra vez ZYKRO para que recree Android con la configuración guardada.

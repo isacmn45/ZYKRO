@@ -9,6 +9,7 @@ use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use eframe::egui::{Color32, ColorImage};
 use memmap2::{Mmap, MmapOptions};
@@ -90,6 +91,9 @@ impl Buffer {
 pub struct Cuadro {
     pub buffer: Arc<Buffer>,
     pub copia: Option<ColorImage>,
+    pub llegada: Instant,
+    /// Cuándo llegó el aviso del servidor, antes de esperar a que Android termine de dibujarlo.
+    pub recibido: Instant,
 }
 
 impl Cuadro {
@@ -130,6 +134,9 @@ pub static COPIAR: AtomicBool = AtomicBool::new(false);
 /// ~47), llegan dos dentro del mismo refresco y luego ninguno. Guardando solo el último se perdía
 /// uno de cada par: hasta 20 por segundo. Con la cola, el segundo se muestra en el refresco siguiente.
 pub type Compartido = Arc<Mutex<VecDeque<Cuadro>>>;
+
+/// Hay cuadros en la cola que la ventana todavía no mostró (se cambia con la cola tomada).
+pub static NUEVO: AtomicBool = AtomicBool::new(false);
 
 /// Cuadros como máximo en la cola: si se acumulan más, se tiran los viejos para no sumar retraso.
 const MAX_COLA: usize = 2;
@@ -201,6 +208,7 @@ pub fn recibir_cuadros(socket: UnixStream, destino: Compartido, mut nuevo: impl 
                 buffers.insert(id, Arc::new(buffer));
             }
             b"DMBX" => {
+                let recibido = Instant::now();
                 // Si trae una fence, esperar (máx. 50 ms) a que Android termine de dibujar.
                 if let Some(fence) = fds.first() {
                     let mut pfd = [PollFd::new(fence.as_fd(), PollFlags::POLLIN)];
@@ -209,10 +217,11 @@ pub fn recibir_cuadros(socket: UnixStream, destino: Compartido, mut nuevo: impl 
                 let Some(b) = buffers.get(&id) else { continue };
                 let copia = COPIAR.load(Ordering::Relaxed).then(|| ColorImage::new([b.ancho, b.alto], b.leer()));
                 let mut cola = destino.lock().unwrap();
-                cola.push_back(Cuadro { buffer: b.clone(), copia });
+                cola.push_back(Cuadro { buffer: b.clone(), copia, llegada: Instant::now(), recibido });
                 while cola.len() > MAX_COLA {
                     cola.pop_front();
                 }
+                NUEVO.store(true, Ordering::Relaxed);
                 drop(cola);
                 nuevo();
             }

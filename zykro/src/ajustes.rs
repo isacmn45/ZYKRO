@@ -199,6 +199,17 @@ impl Ajustes {
             });
         });
         nota(ui, "Se aplica reiniciando ZYKRO y Android. Tus apps y datos no se borran.");
+
+        ui.add_space(4.0);
+        titulo(ui, "Fluidez de la imagen");
+        ui.checkbox(&mut self.borrador.imagen_fluida, "Imagen más fluida (4 a 8 ms más de retraso)");
+        nota(
+            ui,
+            "Activada, cada cuadro espera su turno en la pantalla: casi sin tirones, pero la imagen llega \
+             4 a 8 ms más tarde (medido con Free Fire) y la puntería se siente un poco más pesada. \
+             Desactivada, cada cuadro sale apenas llega: el menor retraso, con algún tirón cuando el juego \
+             entrega cuadros irregulares. Se aplica al instante.",
+        );
     }
 
     fn rendimiento(&mut self, ui: &mut egui::Ui) {

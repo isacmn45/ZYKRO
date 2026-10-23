@@ -23,6 +23,10 @@ const REL_X: u16 = 0;
 const REL_Y: u16 = 1;
 const TAM_EVENTO: usize = 24; // struct input_event en 64 bits
 
+/// La puntería va directo del mouse a Android (copia de `activo` para el bucle de la ventana, que
+/// entonces descarta el movimiento crudo del mouse).
+pub static DIRECTO: AtomicBool = AtomicBool::new(false);
+
 /// `activo`: la ventana lo prende mientras la puntería está activa con el cursor bloqueado.
 /// `listo`: el hilo lo prende si pudo abrir algún mouse (si no, la ventana usa sus propios eventos).
 pub fn iniciar(motor: Arc<Mutex<Motor>>, activo: Arc<AtomicBool>, listo: Arc<AtomicBool>) {

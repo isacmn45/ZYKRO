@@ -13,6 +13,8 @@ pub struct Config {
     /// Modo de rendimiento (se aplica sin reiniciar Android).
     pub modo: crate::rendimiento::Modo,
     pub ocultar_teclado: bool,
+    /// Cada cuadro de video espera su refresco: menos tirones, 4–8 ms más de retraso (ver ritmo.rs).
+    pub imagen_fluida: bool,
     pub android: Android,
 }
 
@@ -35,6 +37,7 @@ impl Default for Config {
             mostrar_temperatura: true,
             modo: crate::rendimiento::Modo::default(),
             ocultar_teclado: true,
+            imagen_fluida: false,
             android: Android::default(),
         }
     }
