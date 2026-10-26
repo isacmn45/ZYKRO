@@ -2,3 +2,5 @@
 /teclado-fisico
 houdini/libhoudini*
 __pycache__/
+# Notas de investigación: solo locales (no se publican).
+docs/investigacion.md
