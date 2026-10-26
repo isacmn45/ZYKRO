@@ -59,3 +59,12 @@ Antes de ZYKRO, este repositorio tenía mejoras para el propio SwagPlayer, que s
 ## Notas
 
 - No se incluye ningún binario de SwagPlayer, BlueStacks ni la `libhoudini.so` de Intel.
+
+## Licencia
+
+ZYKRO es software libre con licencia [MIT](LICENSE): puedes usarlo, copiarlo, modificarlo y
+repartirlo como quieras, también dentro de otros proyectos, siempre que conserves el aviso de copyright
+y la licencia. Se entrega tal cual, sin garantías.
+
+La licencia cubre el código de este repositorio. SwagPlayer, Android, BlueStacks y Free Fire son de
+sus respectivos dueños.

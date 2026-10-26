@@ -3,6 +3,8 @@ name = "zykro"
 version = "0.1.0"
 edition = "2021"
 description = "ZYKRO: emulador propio sobre el Android de SwagPlayer (redroid + swag-rust-server)"
+license = "MIT"
+repository = "https://github.com/isacmn45/ZYKRO"
 
 [dependencies]
 eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
