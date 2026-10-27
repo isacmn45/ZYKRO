@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reemplazan valores de la app de Configuración (mismos nombres). Solo se usan valores propios o de
+     Android: una superposición no puede apuntar a recursos de la app que superpone. -->
+<resources>
+    <!-- Pantalla principal: filas más bajas (antes 88 sp), sin el hueco del avatar invisible de
+         arriba (56 dp de margen + 48 dp), título y buscador más chicos. -->
+    <dimen name="homepage_preference_min_height">44dp</dimen>
+    <dimen name="avatar_margin_top">0dp</dimen>
+    <dimen name="avatar_length">8dp</dimen>
+    <dimen name="homepage_title_margin_bottom">2dp</dimen>
+    <dimen name="homepage_title_margin_horizontal">16dp</dimen>
+    <dimen name="search_bar_height">40dp</dimen>
+    <dimen name="search_bar_margin">8dp</dimen>
+    <dimen name="search_bar_corner_radius">20dp</dimen>
+
+    <!-- Subpantallas: margen de la izquierda (antes 24 dp) y barra del interruptor principal (antes
+         72 dp). La lista de apps no se toca: su fila usa un identificador propio de Configuración. -->
+    <dimen name="settingslib_listPreferredItemPaddingStart">16dp</dimen>
+    <dimen name="settingslib_min_switch_bar_height">48dp</dimen>
+    <!-- Encabezado de las subpantallas: sin el título grande (antes 179 dp), solo la barra con el
+         título normal, como en una tablet. -->
+    <dimen name="settingslib_toolbar_layout_height">120dp</dimen>
+    <dimen name="expanded_title_margin_start">16dp</dimen>
+    <dimen name="expanded_title_margin_end">16dp</dimen>
+
+    <!-- Títulos de las opciones (antes 20 sp), resúmenes y el título grande de arriba (antes 36 dp). -->
+    <style name="TextAppearance.PreferenceTitle.SettingsLib" parent="@android:style/TextAppearance.DeviceDefault">
+        <item name="android:textSize">15sp</item>
+        <item name="android:textColor">?android:attr/textColorPrimary</item>
+    </style>
+    <style name="PreferenceSummaryTextStyle">
+        <item name="android:textSize">12.5sp</item>
+        <item name="android:textColor">?android:attr/textColorSecondary</item>
+    </style>
+    <style name="CollapsingToolbarTitle.Expanded" parent="@android:style/TextAppearance.DeviceDefault">
+        <item name="android:textSize">24dp</item>
+        <item name="android:textColor">?android:attr/textColorPrimary</item>
+    </style>
+</resources>

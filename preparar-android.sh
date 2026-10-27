@@ -78,15 +78,13 @@ fi
 echo "Listo."
 
 paso "Imagen de Android"
-if docker image inspect "$IMAGEN" >/dev/null 2>&1; then
-    echo "Listo: $IMAGEN"
-else
-    if ! docker image inspect "$BASE" >/dev/null 2>&1; then
-        echo "Se descarga $BASE (unos 6 GB; tarda según tu internet)."
-        docker pull "$BASE"
-    fi
-    sh houdini/construir.sh
+if ! docker image inspect "$BASE" >/dev/null 2>&1; then
+    echo "Se descarga $BASE (unos 6 GB; tarda según tu internet)."
+    docker pull "$BASE"
 fi
+# Siempre: si cambió algo de lo nuestro (Houdini, la Configuración compacta), la imagen se actualiza
+# y ZYKRO recrea el contenedor con ella la próxima vez que lo abras (mismos datos).
+sh houdini/construir.sh
 
 paso "Contenedor de Android"
 if docker container inspect "$CONTENEDOR" >/dev/null 2>&1; then

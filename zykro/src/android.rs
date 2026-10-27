@@ -106,11 +106,13 @@ pub fn iniciar(ctx: egui::Context, estado: EstadoCompartido, destino: Compartido
         .name("zykro-android".into())
         .spawn(move || {
             let mut pendiente = estado.lock().unwrap().reinicio.take();
-            // Contenedores creados antes de la batería fija: se recrean con ella (mismos datos) si
-            // Android está apagado, para no cortar una sesión.
+            // Contenedores creados antes de la batería fija, o con una imagen de Android más vieja que
+            // la que dejó instalar.sh: se recrean (mismos datos) si Android está apagado, para no
+            // cortar una sesión.
             if pendiente.is_none() && !corriendo() {
                 let args = argumentos_contenedor().unwrap_or_default();
-                if !args.is_empty() && !args.iter().any(|a| a.starts_with(config::BATERIA_FIJA)) {
+                let sin_bateria = !args.iter().any(|a| a.starts_with(config::BATERIA_FIJA));
+                if !args.is_empty() && (sin_bateria || imagen_desactualizada()) {
                     pendiente = Some(config::Android::desde_argumentos(&args));
                 }
             }
@@ -481,6 +483,17 @@ pub fn leer_config_android() -> Option<config::Android> {
         return None;
     }
     Some(config::Android::desde_argumentos(&args))
+}
+
+/// El contenedor usa una imagen distinta de la que hoy tiene su nombre (se reconstruyó).
+fn imagen_desactualizada() -> bool {
+    let leer = |args: &[&str]| {
+        Command::new("docker").args(args).output().ok().map(|s| String::from_utf8_lossy(&s.stdout).trim().to_string())
+    };
+    let Some(usada) = leer(&["inspect", "-f", "{{.Image}}", CONTENEDOR]) else { return false };
+    let Some(nombre) = leer(&["inspect", "-f", "{{.Config.Image}}", CONTENEDOR]) else { return false };
+    let Some(actual) = leer(&["image", "inspect", "-f", "{{.Id}}", &nombre]) else { return false };
+    !usada.is_empty() && !actual.is_empty() && usada != actual
 }
 
 /// Argumentos de arranque del contenedor (`docker inspect`).

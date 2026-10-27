@@ -1,5 +1,6 @@
 #!/bin/sh
-# Construye la imagen de Android con Houdini parcheado: swagplayer-local:13.0.0-houdini
+# Construye la imagen de Android de ZYKRO: swagplayer-local:13.0.0-houdini, con Houdini parcheado y la
+# Configuración de Android compacta (ajustes-compactos/). Si nada cambió, Docker reutiliza lo anterior.
 set -e
 cd "$(dirname "$0")"
 BASE=geanswag/swagplayer:13.0.0
@@ -10,6 +11,7 @@ docker cp -q swag-houdini-tmp:/system/lib64/libhoudini.so libhoudini.so
 docker rm swag-houdini-tmp >/dev/null
 
 python3 parchear.py libhoudini.so
-docker build -t swagplayer-local:13.0.0-houdini .
-rm -f libhoudini.so
+cp ../ajustes-compactos/ajustes-compactos.apk .
+docker build -q -t swagplayer-local:13.0.0-houdini . >/dev/null
+rm -f libhoudini.so ajustes-compactos.apk
 echo "Imagen lista: swagplayer-local:13.0.0-houdini"

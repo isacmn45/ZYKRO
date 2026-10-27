@@ -24,6 +24,8 @@ como la de BlueStacks.
   una carpeta con las del sistema. Su engrane abre unos **ajustes de Android compactos** dentro de
   ZYKRO: apps (abrir, detener, borrar caché o datos, desinstalar), idioma, letra, animaciones y
   almacenamiento.
+- **Configuración de Android compacta:** la app de Configuración de Android viene con letra, filas,
+  íconos y encabezados más chicos, para que quepa en una ventana de laptop.
 - **Extras:** selector de apps abiertas, capturas de pantalla, scroll con la rueda o el touchpad y
   temperatura de la CPU y la GPU en la barra de título.
 
@@ -50,7 +52,7 @@ Compila ZYKRO, lo copia a `~/.local/bin`, crea su ícono en el menú y prepara A
 2. Monta los dispositivos `binder` en cada arranque (servicio `zykro-binderfs`).
 3. Carga `uinput` en cada arranque.
 4. Descarga la imagen de Android (`geanswag/swagplayer:13.0.0`, unos 6 GB; trae el servidor de video y
-   control que usa ZYKRO) y construye la versión con Houdini parcheado.
+   control que usa ZYKRO) y construye la de ZYKRO (Houdini parcheado y Configuración compacta).
 5. Crea el contenedor de Android.
 
 Pide tu contraseña solo para los pasos 1 a 3, y cada paso se salta si ya está hecho, así que puedes
@@ -71,7 +73,8 @@ Para copiar también nuestro mapeo de Free Fire (reemplaza el que tengas):
 | `launcher/` | La pantalla de inicio de Android (Java, sin Gradle). `launcher/construir.sh` la compila con el SDK de Android; el APK ya compilado viene incluido y ZYKRO lo instala solo en Android. |
 | `preparar-android.sh` | Deja listo Android: Docker, binder, uinput, la imagen y el contenedor. |
 | `bin/teclado-android`, `src/teclado-fisico.c` | Crean un teclado "físico" vacío dentro de Android para que no muestre su teclado en pantalla; ZYKRO lo usa al arrancar. |
-| `houdini/` | Construye la imagen de Android con un parche de 6 bytes en `libhoudini.so` (`houdini/construir.sh`). |
+| `houdini/` | Construye la imagen de Android de ZYKRO (`houdini/construir.sh`): un parche de 6 bytes en `libhoudini.so` y la Configuración compacta. Si la imagen cambia, ZYKRO recrea el contenedor con ella al abrirse (mismos datos). |
+| `ajustes-compactos/` | Superposición de recursos que hace compacta la app de Configuración de Android (`ajustes-compactos/construir.sh`; el APK viene incluido). |
 | `config/keymap/` | Nuestro mapeo de teclas para Free Fire. |
 | `desktop/` | Acceso directo e ícono de ZYKRO. |
 
