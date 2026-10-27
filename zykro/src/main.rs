@@ -216,7 +216,7 @@ struct Zykro {
     editor: editor::Editor,
     /// Menú rápido del botón de controles (sensibilidad), como el de BlueStacks.
     menu: menu::Menu,
-    /// Selector de apps abiertas (el botón Recientes), propio porque Android ya no tiene vista de recientes.
+    /// Apps abiertas (el botón Recientes), propias porque Android no tiene vista de recientes.
     recientes: recientes::Recientes,
     /// Temperatura de CPU y GPU (la lee un hilo cada 2 s).
     temperaturas: sensores::Compartidas,
@@ -998,7 +998,9 @@ impl Zykro {
             } else if !en_borde && !self.ajustes.abierto && !self.menu.abierto() && !self.confirmar_cierre && !self.recientes.abierto() {
                 self.entrada(ctx, rect, ancho, alto);
             }
-            self.recientes.mostrar(ctx, area);
+            if let Some(recientes::Accion::Inicio) = self.recientes.mostrar(ctx, area, rect, self.pantalla.id()) {
+                self.pulsar(3);
+            }
             // Fuera de `entrada` también: que el dedo del scroll nunca se quede abajo.
             if let Some(c) = self.control() {
                 if let Some(falta) = self.rueda.revisar(&c, ancho, alto) {

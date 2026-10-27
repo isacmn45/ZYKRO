@@ -248,7 +248,7 @@ fn poner_zona_horaria() {
 }
 
 /// Paquete de la pantalla de inicio de ZYKRO (`launcher/` de este repositorio).
-const INICIO: &str = "com.zykro.inicio";
+pub const INICIO: &str = "com.zykro.inicio";
 
 /// Instala la pantalla de inicio de ZYKRO en Android si falta o si instalar.sh dejó otra versión
 /// (~/.local/share/zykro/zykro-inicio.apk). La primera vez desactiva el launcher de fábrica para que
