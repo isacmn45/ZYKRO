@@ -182,7 +182,7 @@ fn nombre_app(paquete: &str) -> String {
         ("com.android.chrome", "Chrome"),
         ("com.android.settings", "Ajustes"),
         ("com.aurora.store", "Aurora Store"),
-        ("com.teslacoilsw.launcher", "Nova Launcher"),
+        ("com.zykro.inicio", "Inicio de ZYKRO"),
         ("com.android.documentsui", "Archivos"),
         ("com.teksavia.climint", "Climint"),
         ("com.google.android.youtube", "YouTube"),

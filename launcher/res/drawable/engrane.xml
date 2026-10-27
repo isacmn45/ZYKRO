@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Engrane del botón de Ajustes (dibujo propio). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#EEEBF6" android:fillType="evenOdd" android:pathData="M19.55,9.69 L22.26,10.28 L22.26,13.72 L19.55,14.31 L18.98,15.71 L20.47,18.04 L18.04,20.47 L15.71,18.98 L14.31,19.55 L13.72,22.26 L10.28,22.26 L9.69,19.55 L8.29,18.98 L5.96,20.47 L3.53,18.04 L5.02,15.71 L4.45,14.31 L1.74,13.72 L1.74,10.28 L4.45,9.69 L5.02,8.29 L3.53,5.96 L5.96,3.53 L8.29,5.02 L9.69,4.45 L10.28,1.74 L13.72,1.74 L14.31,4.45 L15.71,5.02 L18.04,3.53 L20.47,5.96 L18.98,8.29 Z M15.30,12.00 A3.3,3.3 0 1,0 8.70,12.00 A3.3,3.3 0 1,0 15.30,12.00 Z" />
+</vector>

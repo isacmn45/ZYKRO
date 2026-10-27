@@ -212,6 +212,8 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
     if ocultar_teclado {
         ocultar_teclado_en_pantalla();
     }
+    poner_zona_horaria();
+    asegurar_inicio();
 
     let ctx2 = ctx.clone();
     video::recibir_cuadros(socket_video, destino.clone(), move || {
@@ -230,6 +232,68 @@ fn redibujar(control: &Control) {
     control.pulsar(223); // KEYCODE_SLEEP
     thread::sleep(Duration::from_millis(250));
     control.pulsar(224); // KEYCODE_WAKEUP
+}
+
+/// Android arranca con la hora UTC: se le pone la zona horaria de la laptop para que su reloj (el de la
+/// pantalla de inicio) marque la hora local.
+fn poner_zona_horaria() {
+    let enlace = std::fs::read_link("/etc/localtime").ok();
+    let Some(zona) = enlace.as_ref().and_then(|r| r.to_str()).and_then(|r| r.split_once("zoneinfo/")).map(|(_, z)| z.to_string())
+    else {
+        return;
+    };
+    thread::spawn(move || {
+        docker(&["exec", CONTENEDOR, "cmd", "alarm", "set-timezone", &zona]);
+    });
+}
+
+/// Paquete de la pantalla de inicio de ZYKRO (`launcher/` de este repositorio).
+const INICIO: &str = "com.zykro.inicio";
+
+/// Instala la pantalla de inicio de ZYKRO en Android si falta o si instalar.sh dejó otra versión
+/// (~/.local/share/zykro/zykro-inicio.apk). La primera vez desactiva el launcher de fábrica para que
+/// Android no pregunte cuál usar.
+fn asegurar_inicio() {
+    let datos = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
+    let Some(apk) = datos.map(|d| d.join("zykro/zykro-inicio.apk")).filter(|p| p.exists()) else { return };
+    thread::spawn(move || {
+        // Tamaño y fecha del APK: si no cambiaron y sigue instalado, no hay nada que hacer.
+        let marca = apk.with_extension("instalado");
+        let firma = std::fs::metadata(&apk)
+            .map(|m| format!("{} {:?}", m.len(), m.modified().ok()))
+            .unwrap_or_default();
+        let ruta = Command::new("docker").args(["exec", CONTENEDOR, "pm", "path", INICIO]).output();
+        let estaba = ruta.is_ok_and(|s| String::from_utf8_lossy(&s.stdout).contains("package:"));
+        if estaba && std::fs::read_to_string(&marca).is_ok_and(|m| m == firma) {
+            return;
+        }
+        let destino = "/data/local/tmp/zykro-inicio.apk";
+        if !docker(&["cp", &apk.to_string_lossy(), &format!("{CONTENEDOR}:{destino}")]) {
+            return;
+        }
+        let instalar = || {
+            let salida = Command::new("docker").args(["exec", CONTENEDOR, "pm", "install", "-r", destino]).output().ok()?;
+            Some(String::from_utf8_lossy(&salida.stdout).to_string() + &String::from_utf8_lossy(&salida.stderr))
+        };
+        let mut resultado = instalar().unwrap_or_default();
+        // Compilada con otra llave (otra copia del repositorio): se quita la vieja y se instala de nuevo.
+        if resultado.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
+            docker(&["exec", CONTENEDOR, "pm", "uninstall", INICIO]);
+            resultado = instalar().unwrap_or_default();
+        }
+        docker(&["exec", CONTENEDOR, "rm", "-f", destino]);
+        if !resultado.contains("Success") {
+            eprintln!("[android] no se pudo instalar la pantalla de inicio: {}", resultado.trim());
+            return;
+        }
+        if !estaba {
+            docker(&["exec", CONTENEDOR, "pm", "disable-user", "--user", "0", "com.android.launcher3"]);
+            docker(&["exec", CONTENEDOR, "input", "keyevent", "3"]);
+        }
+        let _ = std::fs::write(&marca, firma);
+    });
 }
 
 /// Usa teclado-android (`bin/` de este repositorio) para que Android no muestre su teclado en pantalla.
