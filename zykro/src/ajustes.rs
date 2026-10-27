@@ -38,9 +38,9 @@ const DPIS: [(u32, &str); 5] =
     [(160, "160 (pequeño)"), (240, "240 (normal)"), (320, "320 (grande)"), (360, "360 (como BlueStacks)"), (480, "480 (muy grande)")];
 const FPS: [u32; 4] = [30, 60, 90, 120];
 /// Tamaño fijo de la ventana de configuración (el contenido se desplaza si no cabe).
-const ANCHO_PESTANAS: f32 = 170.0;
-const ANCHO_CONTENIDO: f32 = 590.0;
-const ALTO_CONTENIDO: f32 = 470.0;
+pub(crate) const ANCHO_PESTANAS: f32 = 170.0;
+pub(crate) const ANCHO_CONTENIDO: f32 = 590.0;
+pub(crate) const ALTO_CONTENIDO: f32 = 470.0;
 
 pub struct Ajustes {
     pub abierto: bool,
@@ -284,27 +284,27 @@ fn opcion_modo(ui: &mut egui::Ui, modo: Modo, elegido: bool) -> egui::Response {
     resp
 }
 
-fn titulo(ui: &mut egui::Ui, texto: &str) {
+pub(crate) fn titulo(ui: &mut egui::Ui, texto: &str) {
     ui.label(RichText::new(texto).size(16.0).strong().color(TEXTO));
 }
 
-fn nota(ui: &mut egui::Ui, texto: &str) {
+pub(crate) fn nota(ui: &mut egui::Ui, texto: &str) {
     ui.label(RichText::new(texto).size(12.0).color(TENUE));
 }
 
-fn fila(ui: &mut egui::Ui, etiqueta: &str, contenido: impl FnOnce(&mut egui::Ui)) {
+pub(crate) fn fila(ui: &mut egui::Ui, etiqueta: &str, contenido: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         ui.add_sized(Vec2::new(120.0, 24.0), egui::Label::new(RichText::new(etiqueta).color(ICONO)));
         contenido(ui);
     });
 }
 
-fn linea(ui: &mut egui::Ui) {
+pub(crate) fn linea(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, FONDO_HOVER);
 }
 
-fn pestana(ui: &mut egui::Ui, elegida: bool, glifo: &str, nombre: &str) -> egui::Response {
+pub(crate) fn pestana(ui: &mut egui::Ui, elegida: bool, glifo: &str, nombre: &str) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(ANCHO_PESTANAS, 38.0), Sense::click());
     if elegida || resp.hovered() {
         ui.painter().rect_filled(rect.shrink2(Vec2::new(8.0, 2.0)), 4.0, FONDO_HOVER);

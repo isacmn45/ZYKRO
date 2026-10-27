@@ -359,7 +359,7 @@ fn lerp_rect(a: Rect, b: Rect, t: f32) -> Rect {
 
 /// Nombre para mostrar. Android no da las etiquetas de las apps por la terminal, así que se usa una
 /// tabla con las conocidas y, si no, la última parte del paquete.
-fn nombre_app(paquete: &str) -> String {
+pub(crate) fn nombre_app(paquete: &str) -> String {
     let conocidas = [
         ("com.dts.freefireth", "Free Fire"),
         ("com.dts.freefiremax", "Free Fire MAX"),

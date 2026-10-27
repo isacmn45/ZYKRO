@@ -45,9 +45,22 @@ pub struct Estado {
     pub reinicio: Option<config::Android>,
     /// El juego tiene abierto su cuadro de texto (chat): el mapeo se apaga para poder escribir.
     pub escribiendo: bool,
+    /// El engrane del inicio de ZYKRO pidió abrir los ajustes de Android de ZYKRO.
+    pub pedir_ajustes: bool,
 }
 
 pub type EstadoCompartido = Arc<Mutex<Estado>>;
+
+/// Corre `orden` en la shell de Android (como root) y devuelve lo que escribió, si terminó bien.
+pub fn shell(orden: &str) -> Option<String> {
+    let salida = Command::new("docker").args(["exec", CONTENEDOR, "sh", "-c", orden]).stderr(Stdio::null()).output().ok()?;
+    salida.status.success().then(|| String::from_utf8_lossy(&salida.stdout).into_owned())
+}
+
+/// Copia un archivo o carpeta de Android a la laptop.
+pub fn copiar_desde(origen: &str, destino: &Path) -> bool {
+    docker(&["cp", &format!("{CONTENEDOR}:{origen}"), &destino.to_string_lossy()])
+}
 
 fn docker(args: &[&str]) -> bool {
     Command::new("docker")
@@ -312,6 +325,35 @@ fn ocultar_teclado_en_pantalla() {
             let _ = Command::new(script).arg("ocultar").stdout(Stdio::null()).stderr(Stdio::null()).spawn();
         }
     }
+}
+
+/// Escucha lo que la pantalla de inicio de ZYKRO pide por el registro de Android (etiqueta `ZYKRO`):
+/// por ahora, abrir los ajustes de Android de ZYKRO al tocar su engrane.
+pub fn vigilar_peticiones(ctx: egui::Context, estado: EstadoCompartido) {
+    use std::io::{BufRead, BufReader};
+    thread::Builder::new()
+        .name("zykro-peticiones".into())
+        .spawn(move || loop {
+            // Solo lo que llegue desde ahora (la hora de Android), para no repetir pedidos viejos.
+            let orden = "exec logcat -v raw -s ZYKRO:I -T \"$(date '+%m-%d %H:%M:%S.000')\"";
+            let hijo = Command::new("docker")
+                .args(["exec", CONTENEDOR, "sh", "-c", orden])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn();
+            if let Ok(mut hijo) = hijo {
+                for linea in BufReader::new(hijo.stdout.take().unwrap()).lines().map_while(Result::ok) {
+                    if linea.trim() == "ajustes" {
+                        estado.lock().unwrap().pedir_ajustes = true;
+                        ctx.request_repaint();
+                    }
+                }
+                let _ = hijo.wait();
+            }
+            // Android apagado o reiniciándose: se vuelve a intentar.
+            thread::sleep(Duration::from_secs(3));
+        })
+        .expect("no se pudo crear el hilo de peticiones");
 }
 
 /// Vigila los cambios de foco de Android para saber cuándo un juego abre su cuadro de texto

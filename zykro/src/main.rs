@@ -2,6 +2,7 @@
 //! Diseño inspirado en LDPlayer: barra de título oscura y barra lateral delgada con herramientas.
 
 mod ajustes;
+mod ajustes_android;
 mod android;
 mod audio;
 mod carga;
@@ -209,6 +210,8 @@ struct Zykro {
     cuadros_seg: u32,
     inicio_seg: Instant,
     ajustes: ajustes::Ajustes,
+    /// Ajustes de Android de ZYKRO (el engrane de la pantalla de inicio).
+    ajustes_android: ajustes_android::AjustesAndroid,
     motor: Arc<Mutex<mapeo::Motor>>,
     /// El hilo de raton.rs manda la puntería directo (la ventana no procesa el mouse).
     raton_directo: Arc<AtomicBool>,
@@ -291,6 +294,7 @@ impl Zykro {
         let video: video::Compartido = Arc::default();
         android::iniciar(cc.egui_ctx.clone(), estado.clone(), video.clone());
         android::vigilar_texto(cc.egui_ctx.clone(), estado.clone());
+        android::vigilar_peticiones(cc.egui_ctx.clone(), estado.clone());
         audio::iniciar();
         aplicar_modo(&estado, estado.lock().unwrap().config.modo, false);
         let motor = Arc::new(Mutex::new(mapeo::Motor::new()));
@@ -316,6 +320,7 @@ impl Zykro {
             cuadros_seg: 0,
             inicio_seg: Instant::now(),
             ajustes: ajustes::Ajustes::new(),
+            ajustes_android: ajustes_android::AjustesAndroid::new(),
             motor,
             raton_directo,
             raton_listo,
@@ -632,6 +637,7 @@ impl Zykro {
             && !escribiendo
             && !self.editor.abierto
             && !self.ajustes.abierto
+            && !self.ajustes_android.abierto
             && !self.menu.abierto()
             && !self.confirmar_cierre
             && !self.recientes.abierto()
@@ -995,7 +1001,7 @@ impl Zykro {
 
             if self.editor.abierto {
                 self.teclas_editor(ctx);
-            } else if !en_borde && !self.ajustes.abierto && !self.menu.abierto() && !self.confirmar_cierre && !self.recientes.abierto() {
+            } else if !en_borde && !self.ajustes.abierto && !self.ajustes_android.abierto && !self.menu.abierto() && !self.confirmar_cierre && !self.recientes.abierto() {
                 self.entrada(ctx, rect, ancho, alto);
             }
             if let Some(recientes::Accion::Inicio) = self.recientes.mostrar(ctx, area, rect, self.pantalla.id()) {
@@ -1174,6 +1180,10 @@ impl eframe::App for Zykro {
                 None => {}
             }
         }
+        if std::mem::take(&mut self.estado.lock().unwrap().pedir_ajustes) {
+            self.ajustes_android.abrir(ctx);
+        }
+        self.ajustes_android.mostrar(ctx, &self.estado);
         if let Some(nueva) = self.ajustes.mostrar(ctx) {
             self.aplicar_config(ctx, nueva);
         }

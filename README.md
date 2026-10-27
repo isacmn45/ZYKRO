@@ -21,7 +21,9 @@ como la de BlueStacks.
 - **Pantalla:** resolución, DPI y FPS de Android; pantalla completa con FPS y temperatura en una esquina;
   la ventana mantiene la proporción de la imagen al cambiar de tamaño.
 - **Pantalla de inicio propia**, al estilo de BlueStacks 5 y compacta: buscador, tus apps y juegos, y
-  una carpeta con las del sistema.
+  una carpeta con las del sistema. Su engrane abre unos **ajustes de Android compactos** dentro de
+  ZYKRO: apps (abrir, detener, borrar caché o datos, desinstalar), idioma, letra, animaciones y
+  almacenamiento.
 - **Extras:** selector de apps abiertas, capturas de pantalla, scroll con la rueda o el touchpad y
   temperatura de la CPU y la GPU en la barra de título.
 

@@ -26,6 +26,7 @@ import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -45,6 +46,13 @@ import android.widget.ScrollView;
 import android.widget.TextClock;
 import android.widget.TextView;
 import android.widget.Toast;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.List;
@@ -69,6 +77,9 @@ public class Inicio extends Activity implements TextWatcher {
 
     private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT;
     private static final int WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
+
+    /** Etiqueta del registro de Android que lee ZYKRO. */
+    private static final String ETIQUETA = "ZYKRO";
 
     /** Tiendas de apps, en orden de preferencia, para el botón de arriba. */
     private static final String[] TIENDAS = {"com.android.vending", "com.aurora.store"};
@@ -233,6 +244,7 @@ public class Inicio extends Activity implements TextWatcher {
             }
             Collator orden = Collator.getInstance(new Locale("es"));
             nuevas.sort((x, y) -> orden.compare(x.nombre, y.nombre));
+            exportar(nuevas);
             principal.post(() -> {
                 if (esta != carga || isDestroyed()) {
                     return;
@@ -241,6 +253,40 @@ public class Inicio extends Activity implements TextWatcher {
                 mostrar();
             });
         });
+    }
+
+    /**
+     * Deja la lista de apps (nombre y si es del sistema) y sus íconos en la carpeta de esta app
+     * (/sdcard/Android/data/com.zykro.inicio/files), para que ZYKRO los muestre: desde la laptop no
+     * hay forma de saber el nombre ni el ícono de una app.
+     */
+    private void exportar(List<App> lista) {
+        File carpeta = getExternalFilesDir(null);
+        if (carpeta == null) {
+            return;
+        }
+        File iconos = new File(carpeta, "iconos");
+        iconos.mkdirs();
+        JSONArray todas = new JSONArray();
+        try {
+            for (App a : lista) {
+                JSONObject app = new JSONObject();
+                app.put("paquete", a.paquete);
+                app.put("nombre", a.nombre);
+                app.put("sistema", a.sistema);
+                todas.put(app);
+                try (FileOutputStream salida = new FileOutputStream(new File(iconos, a.paquete + ".png"))) {
+                    a.icono.compress(Bitmap.CompressFormat.PNG, 100, salida);
+                }
+            }
+            File temporal = new File(carpeta, "apps.json.tmp");
+            try (FileOutputStream salida = new FileOutputStream(temporal)) {
+                salida.write(todas.toString().getBytes(StandardCharsets.UTF_8));
+            }
+            temporal.renameTo(new File(carpeta, "apps.json"));
+        } catch (IOException | JSONException e) {
+            Log.w(ETIQUETA, "no se pudo guardar la lista de apps", e);
+        }
     }
 
     /** Arma el contenido: los resultados de la búsqueda, o tus apps y la carpeta del sistema. */
@@ -392,8 +438,13 @@ public class Inicio extends Activity implements TextWatcher {
         reloj.setPadding(px(12), 0, px(8), 0);
         barra.addView(reloj);
 
-        ImageView ajustes = botonIcono(getDrawable(R.drawable.engrane),
-                vista -> abrir(new Intent(Settings.ACTION_SETTINGS)));
+        // ZYKRO escucha esta línea del registro y abre su panel de ajustes de Android, más cómodo en
+        // un emulador. Mantenerlo presionado abre la Configuración de Android de siempre.
+        ImageView ajustes = botonIcono(getDrawable(R.drawable.engrane), vista -> Log.i(ETIQUETA, "ajustes"));
+        ajustes.setOnLongClickListener(vista -> {
+            abrir(new Intent(Settings.ACTION_SETTINGS));
+            return true;
+        });
         ajustes.setContentDescription("Ajustes");
         barra.addView(ajustes);
         return barra;
