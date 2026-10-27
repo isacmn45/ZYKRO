@@ -26,10 +26,12 @@ como la de BlueStacks.
 ## Requisitos
 
 - Linux con KDE Plasma en Wayland (probado en CachyOS con Plasma 6).
-- SwagPlayer instalado, que crea el contenedor de Android y trae su servidor. ZYKRO no incluye
+- El Android de SwagPlayer ya preparado. Por ahora lo prepara su instalador la primera vez: descarga
+  la imagen, crea el contenedor y deja listos los dispositivos `binder` al arrancar. Después puedes
+  desinstalar SwagPlayer (con `pacman -R`, sin `-s`, para no llevarte Docker). ZYKRO no incluye
   programas de SwagPlayer.
 - Docker, con tu usuario en los grupos `docker` e `input`.
-- Rust (`cargo`) para compilar.
+- Rust (`cargo`) y `gcc` para compilar.
 - Probado con una GPU Intel (Iris Xe). Con el driver propietario de NVIDIA, ZYKRO todavía no puede
   mostrar la imagen.
 
@@ -42,23 +44,23 @@ como la de BlueStacks.
 Compila ZYKRO, lo copia a `~/.local/bin` y crea su ícono en el menú. Vuelve a correrlo después de
 actualizar el repositorio.
 
-## Herramientas para SwagPlayer
+Para copiar también nuestro mapeo de Free Fire (reemplaza el que tengas):
 
-Antes de ZYKRO, este repositorio tenía mejoras para el propio SwagPlayer, que siguen aquí:
+```bash
+./instalar.sh --keymap
+```
 
-| Mejora | Archivo | Qué hace |
-| --- | --- | --- |
-| Lanzador | `bin/swagplayer-iniciar` | Abre SwagPlayer con todo lo de abajo y apaga Android al cerrarlo. |
-| Cierre sin cuelgues | `src/swag-closefix.c` | Se precarga (`LD_PRELOAD`) y libera los sockets de video/portapapeles para que SwagPlayer cierre sin quedarse colgado. |
-| Sin teclado en pantalla | `src/teclado-fisico.c`, `bin/teclado-android` | Crea un teclado "físico" vacío dentro de Android (uinput) para que Android oculte su teclado en pantalla. |
-| Escribir en el chat | `bin/ff-escribir` | Cuando el juego abre su cuadro de texto, toma el teclado y manda las letras directo a Android. |
-| Cerrar desde el menú | `bin/cerrar-swagplayer` | Cierra SwagPlayer y apaga Android. |
-| Houdini parcheado | `houdini/` | Construye una imagen con un parche de 6 bytes en `libhoudini.so`. |
-| Mapeo de Free Fire | `config/keymap/com.dts.freefireth.json` | Nuestro mapeo de teclas para Free Fire (`./instalar.sh --keymap`). |
+## Qué hay en el repositorio
 
-## Notas
+| Carpeta | Qué es |
+| --- | --- |
+| `zykro/` | El código de ZYKRO (Rust, eframe/egui). |
+| `bin/teclado-android`, `src/teclado-fisico.c` | Crean un teclado "físico" vacío dentro de Android para que no muestre su teclado en pantalla; ZYKRO lo usa al arrancar. |
+| `houdini/` | Construye la imagen de Android con un parche de 6 bytes en `libhoudini.so` (`houdini/construir.sh`). |
+| `config/keymap/` | Nuestro mapeo de teclas para Free Fire. |
+| `desktop/` | Acceso directo e ícono de ZYKRO. |
 
-- No se incluye ningún binario de SwagPlayer, BlueStacks ni la `libhoudini.so` de Intel.
+No se incluye ningún binario de SwagPlayer, BlueStacks ni la `libhoudini.so` de Intel.
 
 ## Licencia
 

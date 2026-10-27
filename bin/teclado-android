@@ -1,10 +1,10 @@
 #!/bin/sh
-# Muestra u oculta el teclado en pantalla de Android en SwagPlayer.
+# Muestra u oculta el teclado en pantalla de Android (ZYKRO lo usa al arrancar).
 #   teclado-android ocultar   -> Android cree que hay teclado físico y no muestra el de pantalla
 #   teclado-android mostrar   -> vuelve el teclado en pantalla
 #   teclado-android           -> alterna entre los dos
 C=redroid-redroid-1
-BIN="$HOME/.local/lib/swagplayer/teclado-fisico"
+BIN="$HOME/.local/lib/zykro/teclado-fisico"
 
 activo() { docker exec "$C" pidof teclado-fisico >/dev/null 2>&1; }
 

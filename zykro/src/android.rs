@@ -232,7 +232,7 @@ fn redibujar(control: &Control) {
     control.pulsar(224); // KEYCODE_WAKEUP
 }
 
-/// Usa teclado-android (de swagplayer-mods) para que Android no muestre su teclado en pantalla.
+/// Usa teclado-android (`bin/` de este repositorio) para que Android no muestre su teclado en pantalla.
 fn ocultar_teclado_en_pantalla() {
     if let Some(home) = std::env::var_os("HOME") {
         let script = PathBuf::from(home).join(".local/bin/teclado-android");

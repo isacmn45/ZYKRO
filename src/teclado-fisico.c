@@ -62,7 +62,7 @@ int main(void) {
     us.id.bustype = BUS_USB;
     us.id.vendor = 0x5357;   // "SW"
     us.id.product = 0x4b42;  // "KB"
-    strcpy(us.name, "SwagPlayer Teclado Fisico");
+    strcpy(us.name, "ZYKRO Teclado Fisico");
     if (ioctl(fd, UI_DEV_SETUP, &us) < 0 || ioctl(fd, UI_DEV_CREATE) < 0) return 1;
 
     char sysname[64] = {0};

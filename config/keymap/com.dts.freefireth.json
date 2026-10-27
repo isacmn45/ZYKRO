@@ -3,25 +3,25 @@
   "keyMapNodes": [
     {
       "centerPos": {
-        "x": 0.16898125,
-        "y": 0.7514333333333334
+        "x": 0.16898125410079956,
+        "y": 0.7514333128929138
       },
       "comment": "Dpad — WASD movement/driving",
       "downKey": "S",
-      "downOffset": 0.0357,
+      "downOffset": 0.0357000008225441,
       "leftKey": "A",
-      "leftOffset": 0.0357,
+      "leftOffset": 0.0357000008225441,
       "rightKey": "D",
-      "rightOffset": 0.0357,
+      "rightOffset": 0.0357000008225441,
       "type": "KMT_STEER_WHEEL",
       "upKey": "W",
-      "upOffset": 0.0357
+      "upOffset": 0.0357000008225441
     },
     {
       "comment": "Change weapon 1",
       "key": "R",
       "pos": {
-        "x": 0.9440823197364808,
+        "x": 0.9440823197364807,
         "y": 0.07880512624979019
       },
       "switchMap": false,
@@ -41,7 +41,7 @@
       "comment": "Change weapon 3",
       "key": "Key_Space",
       "pos": {
-        "x": 0.9547706842422484,
+        "x": 0.9547706842422485,
         "y": 0.7037795186042786
       },
       "switchMap": false,
@@ -51,7 +51,7 @@
       "comment": "Reload",
       "key": "C",
       "pos": {
-        "x": 0.9563261270523072,
+        "x": 0.9563261270523071,
         "y": 0.903366208076477
       },
       "switchMap": false,
@@ -62,7 +62,7 @@
       "key": "5",
       "pos": {
         "x": 0.6768485307693481,
-        "y": 0.9152321815490724
+        "y": 0.9152321815490723
       },
       "switchMap": false,
       "type": "KMT_CLICK"
@@ -101,7 +101,7 @@
       "comment": "Revive",
       "key": "1",
       "pos": {
-        "x": 0.9169532060623168,
+        "x": 0.9169532060623169,
         "y": 0.129261776804924
       },
       "switchMap": false,
@@ -111,7 +111,7 @@
       "comment": "Interact",
       "key": "2",
       "pos": {
-        "x": 0.9514757394790648,
+        "x": 0.9514757394790649,
         "y": 0.13036994636058807
       },
       "switchMap": false,
@@ -143,6 +143,7 @@
         "x": 0.8679900765419006,
         "y": 0.8995364308357239
       },
+      "switchMap": false,
       "type": "KMT_CLICK"
     },
     {
@@ -151,6 +152,7 @@
         "x": 0.059965092688798904,
         "y": 0.9033872485160828
       },
+      "switchMap": false,
       "type": "KMT_CLICK"
     },
     {
@@ -159,14 +161,16 @@
         "x": 0.22952336072921753,
         "y": 0.9036458134651184
       },
+      "switchMap": false,
       "type": "KMT_CLICK"
     },
     {
       "key": "F",
       "pos": {
         "x": 0.6129072308540344,
-        "y": 0.4609190225601196
+        "y": 0.46091902256011963
       },
+      "switchMap": false,
       "type": "KMT_CLICK"
     },
     {
@@ -175,6 +179,7 @@
         "x": 0.8975518345832825,
         "y": 0.23939402401447296
       },
+      "switchMap": false,
       "type": "KMT_CLICK"
     },
     {
@@ -183,6 +188,7 @@
         "x": 0.833228588104248,
         "y": 0.23982343077659607
       },
+      "switchMap": false,
       "type": "KMT_CLICK"
     },
     {
@@ -191,6 +197,7 @@
         "x": 0.739037036895752,
         "y": 0.7582095861434937
       },
+      "switchMap": false,
       "type": "KMT_CLICK"
     },
     {
@@ -199,6 +206,7 @@
         "x": 0.598619818687439,
         "y": 0.7457751631736755
       },
+      "switchMap": false,
       "type": "KMT_CLICK"
     }
   ],
@@ -206,32 +214,32 @@
     "activationTimeMs": 40,
     "adsEnabled": true,
     "adsKey": "RightButton",
-    "adsSensMultiplier": 0.4,
+    "adsSensMultiplier": 0.4000000059604645,
     "adsSmoothAlphaMax": 0.25,
     "adsSmoothAlphaMin": 0.025,
     "adsVelocityMinFactor": 0.12,
     "comment": "Pan control — Precision Aim Engine (Free Fire optimized)",
     "mouseAcceleration": false,
     "noiseEpsilon": 0.35,
-    "panLimitBottom": 350,
-    "panLimitLeft": 350,
-    "panLimitRight": 350,
-    "panLimitTop": 350,
-    "sensitivityRatioY": 1.149999976158142,
-    "sensitivityX": 1.350000023841858,
+    "panLimitBottom": 350.0,
+    "panLimitLeft": 350.0,
+    "panLimitRight": 350.0,
+    "panLimitTop": 350.0,
+    "sensitivityRatioY": 1.4285714626312256,
+    "sensitivityX": 1.399999976158142,
     "shootOnClick": true,
     "shootPos": {
       "x": 0.8289979100227356,
       "y": 0.6954305768013
     },
-    "smoothAlphaMax": 0.55,
-    "smoothAlphaMin": 0.04,
-    "smoothSpeedThresh": 12,
-    "speedRatioX": 1,
-    "speedRatioY": 1,
+    "smoothAlphaMax": 0.550000011920929,
+    "smoothAlphaMin": 0.03999999910593033,
+    "smoothSpeedThresh": 12.0,
+    "speedRatioX": 1.0,
+    "speedRatioY": 1.0,
     "startPos": {
-      "x": 0.79366534948349,
-      "y": 0.4899415969848633
+      "x": 0.7405155301094055,
+      "y": 0.3799717426300049
     },
     "suspendKey": "Key_Control",
     "touchIdleTimeoutMs": 2500,
@@ -243,7 +251,7 @@
   },
   "overlaySettings": {
     "enabled": true,
-    "opacity": 0.699999988079071
+    "opacity": 0.10000000149011612
   },
   "switchKey": "Key_QuoteLeft",
   "width": 1920

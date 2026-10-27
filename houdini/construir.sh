@@ -12,4 +12,4 @@ docker rm swag-houdini-tmp >/dev/null
 python3 parchear.py libhoudini.so
 docker build -t swagplayer-local:13.0.0-houdini .
 rm -f libhoudini.so
-echo "Imagen lista. En ~/.config/swagplayer/state.json: \"docker_image\": \"swagplayer-local:13.0.0-houdini\""
+echo "Imagen lista: swagplayer-local:13.0.0-houdini"
