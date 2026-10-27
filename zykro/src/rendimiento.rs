@@ -305,7 +305,7 @@ pub fn aplicar(modo: Modo) -> Vec<&'static str> {
         if gpu_permitida() {
             poner_gpu(Some(modo));
         } else if modo == Modo::Ultra {
-            fallos.push("falta el permiso para ajustar la GPU (Configuración → Rendimiento)");
+            fallos.push("falta el permiso para ajustar la GPU (en Configuración, pestaña Rendimiento)");
         }
     }
     fallos

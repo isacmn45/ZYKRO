@@ -384,10 +384,11 @@ pub fn etiqueta(nombre: &str) -> String {
         "MiddleButton" => "Rueda".into(),
         "XButton1" => "Lateral 1".into(),
         "XButton2" => "Lateral 2".into(),
-        "Key_Up" => "↑".into(),
-        "Key_Down" => "↓".into(),
-        "Key_Left" => "←".into(),
-        "Key_Right" => "→".into(),
+        // Las fuentes de egui no traen las flechas (↑↓←→): se usan las de Phosphor.
+        "Key_Up" => egui_phosphor::regular::ARROW_UP.into(),
+        "Key_Down" => egui_phosphor::regular::ARROW_DOWN.into(),
+        "Key_Left" => egui_phosphor::regular::ARROW_LEFT.into(),
+        "Key_Right" => egui_phosphor::regular::ARROW_RIGHT.into(),
         "" => "?".into(),
         otro => otro.strip_prefix("Key_").unwrap_or(otro).to_string(),
     }
