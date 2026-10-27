@@ -92,7 +92,15 @@ pub fn iniciar(ctx: egui::Context, estado: EstadoCompartido, destino: Compartido
     thread::Builder::new()
         .name("zykro-android".into())
         .spawn(move || {
-            let pendiente = estado.lock().unwrap().reinicio.take();
+            let mut pendiente = estado.lock().unwrap().reinicio.take();
+            // Contenedores creados antes de la batería fija: se recrean con ella (mismos datos) si
+            // Android está apagado, para no cortar una sesión.
+            if pendiente.is_none() && !corriendo() {
+                let args = argumentos_contenedor().unwrap_or_default();
+                if !args.is_empty() && !args.iter().any(|a| a.starts_with(config::BATERIA_FIJA)) {
+                    pendiente = Some(config::Android::desde_argumentos(&args));
+                }
+            }
             if let Some(nueva) = pendiente {
                 mensaje(&estado, Etapa::Encender, "Reiniciando Android con la nueva configuración…");
                 ctx.request_repaint();
@@ -426,17 +434,24 @@ pub fn cerrar_tarea(raiz: u32) {
 
 /// Configuración de Android con la que está creado el contenedor.
 pub fn leer_config_android() -> Option<config::Android> {
-    let salida = Command::new("docker").args(["inspect", CONTENEDOR]).output().ok()?;
-    let info: serde_json::Value = serde_json::from_slice(&salida.stdout).ok()?;
-    let args: Vec<String> = ["Entrypoint", "Cmd"]
-        .iter()
-        .flat_map(|k| info[0]["Config"][k].as_array().cloned().unwrap_or_default())
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
+    let args = argumentos_contenedor()?;
     if args.is_empty() {
         return None;
     }
     Some(config::Android::desde_argumentos(&args))
+}
+
+/// Argumentos de arranque del contenedor (`docker inspect`).
+fn argumentos_contenedor() -> Option<Vec<String>> {
+    let salida = Command::new("docker").args(["inspect", CONTENEDOR]).output().ok()?;
+    let info: serde_json::Value = serde_json::from_slice(&salida.stdout).ok()?;
+    Some(
+        ["Entrypoint", "Cmd"]
+            .iter()
+            .flat_map(|k| info[0]["Config"][k].as_array().cloned().unwrap_or_default())
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect(),
+    )
 }
 
 /// Recrea el contenedor con los mismos ajustes de Docker que le puso SwagPlayer, cambiando solo

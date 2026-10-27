@@ -16,6 +16,9 @@ pub struct Config {
     pub android: Android,
 }
 
+/// Argumento de arranque para que Android use una batería falsa fija (ver `Android::argumentos`).
+pub const BATERIA_FIJA: &str = "androidboot.fake_battery";
+
 /// Lo que se aplica reiniciando Android.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -89,6 +92,9 @@ impl Android {
             ("androidboot.qemu.vsync", self.fps.to_string()),
             ("debug.mesa.swag.lod.bias.enabled", (self.lod_activado as u8).to_string()),
             ("debug.mesa.swag.lod.bias", format!("{:.2}", self.lod)),
+            // Batería falsa fija (42 %): Android lee la batería de la laptop y, al verla en 0 % sin
+            // cargador, se apagaba solo («shutdown,battery»).
+            (BATERIA_FIJA, "1".into()),
         ]
     }
 

@@ -94,7 +94,8 @@ if docker container inspect "$CONTENEDOR" >/dev/null 2>&1; then
 else
     mkdir -p "$SOCKETS"
     # Los mismos ajustes que usaba SwagPlayer. Resolución, DPI, FPS y texturas salen de los valores
-    # iniciales de ZYKRO y se cambian desde Configuración. Se hace pasar por un Sony Xperia 1 V.
+    # iniciales de ZYKRO y se cambian desde Configuración. Se hace pasar por un Sony Xperia 1 V. Usa
+    # una batería falsa fija: si no, lee la de la laptop y se apaga solo al verla en 0 % sin cargador.
     set -- --name "$CONTENEDOR" --privileged --security-opt label=disable --shm-size 64m \
         -v "$SOCKETS:/data/local/tmp/swag_sockets" -v "$VOLUMEN:/data" --device /dev:/dev:rwm \
         --device-cgroup-rule 'c 10:223 rmw' --device-cgroup-rule 'c 13:* rmw'
@@ -105,6 +106,7 @@ else
         androidboot.redroid_width=1280 androidboot.redroid_height=720 androidboot.redroid_dpi=240 \
         androidboot.redroid_fps=60 androidboot.qemu.vsync=60 \
         androidboot.swag_container=1 androidboot.redroid_gpu_mode=host \
+        androidboot.fake_battery=1 \
         debug.mesa.swag.lod.bias.enabled=1 debug.mesa.swag.lod.bias=0.50 \
         ro.product.cpu.abilist=x86_64,arm64-v8a,x86,armeabi-v7a,armeabi \
         ro.product.cpu.abilist64=x86_64,arm64-v8a ro.product.cpu.abilist32=x86,armeabi-v7a,armeabi \
