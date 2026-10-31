@@ -45,6 +45,7 @@ const MESES: [&str; 12] = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago
 /// Lo que la ventana tiene que hacer al tocar algunos interruptores.
 pub enum Accion {
     Captura,
+    Configuracion,
     AjustesAndroid,
     /// Abrir el panel de Android de siempre (música, responder mensajes).
     PanelAndroid,
@@ -309,7 +310,12 @@ impl Panel {
             if boton_icono(ui, &p, cerrar, ic::CARET_UP, "Cerrar") {
                 self.cerrar();
             }
-            let borrar = Rect::from_min_size(Pos2::new(cerrar.min.x - 8.0 - 130.0, y + 3.0), Vec2::new(130.0, 34.0));
+            let configuracion = Rect::from_min_size(Pos2::new(cerrar.min.x - 42.0, y + 3.0), Vec2::splat(34.0));
+            if boton_icono(ui, &p, configuracion, ic::GEAR, "Configuración de ZYKRO") {
+                self.cerrar();
+                accion = Some(Accion::Configuracion);
+            }
+            let borrar = Rect::from_min_size(Pos2::new(configuracion.min.x - 8.0 - 130.0, y + 3.0), Vec2::new(130.0, 34.0));
             if d.notificaciones.iter().any(|n| n.descartable) && boton_texto(ui, &p, borrar, ic::BROOM, "Borrar todo") {
                 Panel::pedir("BORRAR_TODO", None, None);
             }
@@ -758,4 +764,30 @@ fn carpeta_iconos() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".cache"))
         .join("zykro/notificaciones")
+}
+
+#[cfg(test)]
+mod pruebas {
+    use super::*;
+
+    #[test]
+    fn tuerca_abre_configuracion_de_zykro_y_cierra_panel() {
+        let ctx = egui::Context::default();
+        let area = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
+        let mut panel = Panel { abierto: true, visible: true, posicion: Deslizar::quieto(0.0), ..Default::default() };
+        let entrada = || egui::RawInput { screen_rect: Some(area), ..Default::default() };
+        for _ in 0..2 {
+            ctx.run_ui(entrada(), |ui| { panel.mostrar(ui.ctx(), area); }).drop_without_applying_deltas();
+        }
+        let centro = Pos2::new(area.max.x - MARGEN - 59.0, 34.0);
+        let mut clic = entrada();
+        clic.events.push(egui::Event::PointerMoved(centro));
+        for pressed in [true, false] {
+            clic.events.push(egui::Event::PointerButton { pos: centro, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        }
+        let mut accion = None;
+        ctx.run_ui(clic, |ui| { accion = panel.mostrar(ui.ctx(), area); }).drop_without_applying_deltas();
+        assert!(matches!(accion, Some(Accion::Configuracion)));
+        assert!(!panel.visible);
+    }
 }

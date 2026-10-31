@@ -105,6 +105,7 @@ public class Inicio extends Activity implements TextWatcher {
     private List<App> apps = new ArrayList<>();
     /** Número de la última carga pedida: si llega una vieja, se descarta. */
     private int carga;
+    private int cargaFondo;
     private float dp;
     private FrameLayout raiz;
     private ImageView imagenFondo;
@@ -252,19 +253,28 @@ public class Inicio extends Activity implements TextWatcher {
 
     /** Dibuja el fondo elegido (ver {@link Fondo}) o, si no hay, el degradado de ZYKRO. */
     void cargarFondo() {
+        final int esta = ++cargaFondo;
         File archivo = Fondo.archivo(this, Fondo.IMAGEN);
         fondo.execute(() -> {
             Bitmap imagen = archivo != null && archivo.exists() ? BitmapFactory.decodeFile(archivo.getPath()) : null;
             principal.post(() -> {
-                if (isDestroyed()) {
+                if (isDestroyed() || esta != cargaFondo) {
                     return;
                 }
-                imagenFondo.setImageBitmap(imagen);
-                int visible = imagen == null ? View.GONE : View.VISIBLE;
-                imagenFondo.setVisibility(visible);
-                veloFondo.setVisibility(visible);
+                mostrarFondo(imagen);
             });
         });
+    }
+
+    void mostrarFondo(Bitmap imagen) {
+        if (isDestroyed()) {
+            return;
+        }
+        cargaFondo++;
+        imagenFondo.setImageBitmap(imagen);
+        int visible = imagen == null ? View.GONE : View.VISIBLE;
+        imagenFondo.setVisibility(visible);
+        veloFondo.setVisibility(visible);
     }
 
     // -----------------------------------------------------------------------------------------

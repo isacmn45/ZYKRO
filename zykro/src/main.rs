@@ -1244,6 +1244,7 @@ impl Zykro {
             }
             match self.panel.mostrar(ctx, area) {
                 Some(panel::Accion::Captura) => self.captura(),
+                Some(panel::Accion::Configuracion) => self.abrir_ajustes(),
                 Some(panel::Accion::AjustesAndroid) => self.ajustes_android.abrir(ctx),
                 Some(panel::Accion::PanelAndroid) => {
                     thread::spawn(|| android::shell("cmd statusbar expand-notifications"));

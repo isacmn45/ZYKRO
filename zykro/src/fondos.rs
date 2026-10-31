@@ -351,6 +351,7 @@ fn ruido(x: usize, y: usize) -> f32 {
 fn guardar_png(ruta: &Path, pixeles: &[u8], ancho: usize, alto: usize) -> bool {
     let Ok(archivo) = std::fs::File::create(ruta) else { return false };
     let mut codificador = png::Encoder::new(BufWriter::new(archivo), ancho as u32, alto as u32);
+    codificador.set_compression(png::Compression::Fast);
     codificador.set_color(png::ColorType::Rgba);
     codificador.set_depth(png::BitDepth::Eight);
     codificador.write_header().and_then(|mut w| w.write_image_data(pixeles)).is_ok()
@@ -363,4 +364,40 @@ fn cache() -> PathBuf {
         .join("zykro");
     let _ = std::fs::create_dir_all(&carpeta);
     carpeta
+}
+
+#[cfg(test)]
+mod pruebas {
+    use super::*;
+
+    #[test]
+    fn png_rapido_conserva_pixeles_y_resolucion() {
+        let ruta = std::env::temp_dir().join(format!("zykro-fondo-{}.png", std::process::id()));
+        let pixeles = pintar(&DISENOS[2], 256, 144);
+        assert!(guardar_png(&ruta, &pixeles, 256, 144));
+        let mut lector = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&ruta).unwrap())).read_info().unwrap();
+        let mut salida = vec![0; lector.output_buffer_size().unwrap()];
+        let info = lector.next_frame(&mut salida).unwrap();
+        assert_eq!((info.width, info.height), (256, 144));
+        assert_eq!(&salida[..info.buffer_size()], pixeles.as_slice());
+        std::fs::remove_file(ruta).unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    fn medir_compresion_de_fondos() {
+        let pixeles = pintar(&DISENOS[2], 1920, 1080);
+        for _ in 0..3 {
+            for compresion in [png::Compression::Balanced, png::Compression::Fast] {
+                let inicio = std::time::Instant::now();
+                let mut salida = Vec::new();
+                let mut codificador = png::Encoder::new(&mut salida, 1920, 1080);
+                codificador.set_color(png::ColorType::Rgba);
+                codificador.set_depth(png::BitDepth::Eight);
+                codificador.set_compression(compresion);
+                codificador.write_header().unwrap().write_image_data(&pixeles).unwrap();
+                eprintln!("[fondos] {compresion:?}: {:?}, {} bytes", inicio.elapsed(), salida.len());
+            }
+        }
+    }
 }

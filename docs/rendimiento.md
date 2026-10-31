@@ -66,3 +66,24 @@ ZYKRO normalmente también apaga Android; no se hizo durante esta revisión.
 Para la siguiente comparación en un juego, usar el mismo escenario, resolución,
 FPS y modo, arrancar con `ZYKRO_RITMO=1` y comparar los registros de intervalos,
 cuadros tapados/repetidos y retraso. Esas medidas aún no se han tomado.
+
+## Aplicación de fondos
+
+El codificador PNG de los fondos pasa de `Balanced` a `Fast`, sin cambiar los
+píxeles ni la resolución. La prueba de ida y vuelta decodifica el PNG y comprueba
+que coincide con los píxeles originales. Para repetir la medición:
+
+```sh
+cargo test --release medir_compresion_de_fondos -- --ignored --nocapture
+```
+
+Con el fondo Neón a 1920 × 1080, tres pasadas en esta máquina dieron medianas
+de 713,69 ms con Balanced y 27,90 ms con Fast. Los archivos fueron de 1.561.377
+y 2.300.042 bytes, respectivamente. Se mide solamente la compresión en memoria,
+no la latencia completa hasta la pantalla.
+
+El launcher muestra el bitmap preparado antes de persistirlo y no vuelve a
+decodificar el PNG recién guardado. Si ya coincide en tamaño y no necesita giro,
+reutiliza el bitmap sin una copia de pantalla completa. Una carga antigua del
+disco tampoco puede reemplazar una selección nueva. Estas mejoras no cambian
+los colores, el recorte, la resolución ni la persistencia del fondo.

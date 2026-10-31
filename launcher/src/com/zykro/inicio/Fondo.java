@@ -72,7 +72,10 @@ final class Fondo {
             if (leida == null) {
                 return false;
             }
-            Bitmap ajustada = cubrir(leida, girar(origen), ancho, alto);
+            int grados = girar(origen);
+            Bitmap ajustada = grados == 0 && leida.getWidth() == ancho && leida.getHeight() == alto
+                ? leida : cubrir(leida, grados, ancho, alto);
+            mostrar(ajustada);
             guardar(ajustada, imagen);
             guardar(cubrir(ajustada, 0, ANCHO_MINIATURA, Math.round(ANCHO_MINIATURA * alto / (float) ancho)), archivo(contexto, MINIATURA));
             try (FileOutputStream salida = new FileOutputStream(archivo(contexto, NOMBRE))) {
@@ -80,6 +83,10 @@ final class Fondo {
             }
         } catch (IOException | RuntimeException | OutOfMemoryError e) {
             Log.w("ZYKRO", "no se pudo poner el fondo", e);
+            Inicio inicio = Inicio.activa;
+            if (inicio != null) {
+                inicio.runOnUiThread(inicio::cargarFondo);
+            }
             return false;
         }
         avisar();
@@ -94,6 +101,7 @@ final class Fondo {
                 f.delete();
             }
         }
+        mostrar(null);
         avisar();
     }
 
@@ -142,11 +150,14 @@ final class Fondo {
     }
 
     /** La pantalla de inicio lo vuelve a dibujar y ZYKRO actualiza su ventana de fondos. */
-    private static void avisar() {
+    private static void mostrar(Bitmap imagen) {
         Inicio inicio = Inicio.activa;
         if (inicio != null) {
-            inicio.runOnUiThread(inicio::cargarFondo);
+            inicio.runOnUiThread(() -> inicio.mostrarFondo(imagen));
         }
+    }
+
+    private static void avisar() {
         Log.i("ZYKRO", "fondo");
     }
 }
