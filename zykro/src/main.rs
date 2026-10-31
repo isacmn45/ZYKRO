@@ -92,12 +92,21 @@ fn main() -> eframe::Result {
     // Desde el acceso directo de una app (`--abrir paquete`): si ZYKRO ya está abierto, solo se abre
     // la app en Android; si no, ZYKRO se abre y la abre cuando Android esté listo.
     let paquete = std::env::args().skip_while(|a| a != "--abrir").nth(1);
-    let _instancia = tomar_instancia(paquete.is_none()).map_err(|error| eframe::Error::AppCreation(Box::new(error)))?;
-    if let Some(paquete) = paquete {
-        if _instancia.is_none() {
-            android::abrir_app(&paquete);
-            return Ok(());
+    // Al reabrirse (reiniciar, aplicar la configuración o restaurar), espera a que la ventana
+    // anterior se cierre y suelte el candado.
+    let reapertura = std::env::args().any(|a| [REINICIAR, APLICAR_ANDROID, RESTAURAR].contains(&a.as_str()));
+    let _instancia = tomar_instancia(reapertura).map_err(|error| eframe::Error::AppCreation(Box::new(error)))?;
+    if _instancia.is_none() {
+        match paquete {
+            Some(paquete) => android::abrir_app(&paquete),
+            // Abrirlo otra vez desde el menú no deja una segunda ventana esperando a que se cierre la primera.
+            None => {
+                let _ = Command::new("notify-send").args(["-a", NOMBRE, "ZYKRO ya está abierto"]).status();
+            }
         }
+        return Ok(());
+    }
+    if let Some(paquete) = paquete {
         *android::ABRIR_AL_INICIAR.lock().unwrap() = Some(paquete);
     }
     registrar_en_archivo();

@@ -1,9 +1,13 @@
+//! Reabrir ZYKRO: el candado de instancia y la orden que lanza la ventana nueva.
+
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::Command;
 
+/// Toma el candado de `ruta`. Con `esperar`, espera a que lo suelte otro proceso; si no, devuelve
+/// `None` cuando ya está tomado.
 pub fn bloquear(ruta: &Path, esperar: bool) -> io::Result<Option<File>> {
     let archivo = OpenOptions::new().create(true).truncate(false).write(true).open(ruta)?;
     let modo = if esperar { libc::LOCK_EX } else { libc::LOCK_EX | libc::LOCK_NB };
@@ -17,6 +21,8 @@ pub fn bloquear(ruta: &Path, esperar: bool) -> io::Result<Option<File>> {
     Ok(Some(archivo))
 }
 
+/// La orden que reabre ZYKRO con el ejecutable instalado (aunque se haya reemplazado mientras
+/// estaba abierto) y el argumento de lo que hay que hacer al arrancar.
 pub fn comando(exe: &Path, respaldo: Option<&Path>, reiniciar: bool) -> Command {
     let ruta = exe.to_string_lossy();
     let mut orden = Command::new(ruta.trim_end_matches(" (deleted)"));
@@ -30,6 +36,7 @@ pub fn comando(exe: &Path, respaldo: Option<&Path>, reiniciar: bool) -> Command 
     orden
 }
 
+/// Corre `orden` (apagar Android) y la convierte en error si falla.
 pub fn esperar_apagado(orden: &mut Command) -> io::Result<()> {
     let resultado = orden.output()?;
     if resultado.status.success() {

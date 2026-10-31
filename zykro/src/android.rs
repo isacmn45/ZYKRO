@@ -632,12 +632,14 @@ pub fn abrir_app(paquete: &str) {
 /// App que hay que abrir en cuanto Android esté listo (ZYKRO se abrió desde su acceso directo).
 pub static ABRIR_AL_INICIAR: Mutex<Option<String>> = Mutex::new(None);
 
-/// Lo de Configuración que se aplica en Android sin reiniciarlo: la operadora, el sonido al tocar y
-/// ADB (Android lo olvida al reiniciarse, así que se aplica cada vez que arranca).
+/// Con la imagen sin Bluetooth (sin interfaz HCI), el adaptador y la búsqueda BLE quedan apagados
+/// para que el servicio de Android no falle al arrancar.
 const BLUETOOTH_SIN_HAL: &str = "if [ \"$(getprop persist.bluetooth.disabled)\" = true ] || \
     [ \"$(getprop bluetooth.service.enabled)\" = false ]; then \
     settings put global ble_scan_always_enabled 0; svc bluetooth disable; fi";
 
+/// Lo de Configuración que se aplica en Android sin reiniciarlo: la operadora, el sonido al tocar y
+/// ADB (Android lo olvida al reiniciarse, así que se aplica cada vez que arranca).
 pub fn aplicar_preferencias(config: &config::Config) {
     let mut adb = if config.adb { "setprop service.adb.tcp.port 5555; setprop ctl.start adbd".to_string() } else { "setprop ctl.stop adbd".into() };
     // La llave de `adb` de la laptop queda autorizada: sin esto, Android pide aceptarla (como un

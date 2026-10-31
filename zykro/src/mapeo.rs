@@ -1756,6 +1756,8 @@ impl Motor {
             || self.habilidad.is_some()
             || !self.rotar.is_empty()
             || borde
+            // Si el cursor sale de la imagen con el dedo de borde abajo, el tick lo tiene que levantar.
+            || self.borde.en_orilla.is_some()
     }
 
     fn programar(&mut self, cuando: Instant, accion: u8, dedo: u64, x: i32, y: i32) {
@@ -2230,6 +2232,20 @@ mod pruebas {
             motor.tick(ctl, W, H);
         });
         assert_eq!(eventos, vec![(BAJAR, 12, 34)]);
+    }
+
+    #[test]
+    fn borde_levanta_el_dedo_si_el_cursor_sale_de_la_imagen() {
+        let borde: Borde = serde_json::from_value(serde_json::json!({ "pos": { "x": 0.5, "y": 0.5 } })).unwrap();
+        let eventos = toques(con(Nodo::Borde(borde)), |motor, ctl| {
+            motor.puntero(Some((1.0, H / 2.0)), ctl, W, H);
+            motor.tick(ctl, W, H);
+            motor.puntero(None, ctl, W, H);
+            motor.tick(ctl, W, H);
+            assert!(!motor.ocupado());
+        });
+        assert_eq!(eventos.first().map(|e| e.0), Some(BAJAR));
+        assert_eq!(eventos.last().map(|e| e.0), Some(SOLTAR));
     }
 
     #[test]
