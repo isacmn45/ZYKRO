@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SystemUI trae valores propios para horizontal (lo normal en ZYKRO): sin estos, ganan los suyos. -->
+<resources>
+    <dimen name="qqs_layout_margin_top">4dp</dimen>
+    <dimen name="qs_brightness_margin_bottom">6dp</dimen>
+</resources>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reemplazan valores de SystemUI (mismos nombres): botones rápidos, encabezado y panel de
+     notificaciones más chicos. El texto de cada notificación lo pone Android, no SystemUI. -->
+<resources>
+    <!-- Botones rápidos: fila corta (antes 60 dp), panel completo (antes 80 dp), letra (antes 14 sp),
+         ícono, relleno y separación. -->
+    <dimen name="qs_quick_tile_size">44dp</dimen>
+    <dimen name="qs_tile_height">56dp</dimen>
+    <dimen name="qs_tile_text_size">12sp</dimen>
+    <dimen name="qs_icon_size">18dp</dimen>
+    <dimen name="qs_tile_padding">8dp</dimen>
+    <dimen name="qs_tile_margin_horizontal">6dp</dimen>
+    <dimen name="qs_label_container_margin">6dp</dimen>
+    <dimen name="qs_corner_radius">20dp</dimen>
+
+    <!-- Encabezado con la hora y la fecha (antes 48 dp de alto) y su separación con los botones. -->
+    <dimen name="qs_header_row_min_height">36dp</dimen>
+    <dimen name="qqs_layout_margin_top">4dp</dimen>
+
+    <!-- Barra de abajo del panel (ajustes, apagar) y separación del brillo. -->
+    <dimen name="footer_actions_height">44dp</dimen>
+    <dimen name="qs_footer_height">40dp</dimen>
+
+    <!-- Notificaciones: márgenes (antes 16 dp), esquinas (antes 28 dp) y la fila de íconos de abajo. -->
+    <dimen name="notification_side_paddings">8dp</dimen>
+    <dimen name="notification_shade_content_margin_horizontal">8dp</dimen>
+    <dimen name="notification_corner_radius">16dp</dimen>
+    <dimen name="notification_shelf_height">36dp</dimen>
+    <dimen name="notification_panel_margin_bottom">16dp</dimen>
+
+    <!-- Hora y fecha del encabezado (antes 14 sp). -->
+    <style name="TextAppearance.QS.Status" parent="@android:style/TextAppearance.DeviceDefault">
+        <item name="android:textSize">13sp</item>
+        <item name="android:textColor">?android:attr/textColorPrimary</item>
+        <item name="android:letterSpacing">0.01</item>
+    </style>
+</resources>
