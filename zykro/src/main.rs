@@ -13,6 +13,7 @@ mod curva;
 mod editor;
 mod mapeo;
 mod menu;
+mod panel;
 mod raton;
 mod recientes;
 mod rendimiento;
@@ -218,6 +219,8 @@ struct Zykro {
     ajustes: ajustes::Ajustes,
     /// Ajustes de Android de ZYKRO (el engrane de la pantalla de inicio).
     ajustes_android: ajustes_android::AjustesAndroid,
+    /// Panel de notificaciones al estilo de Android 4 (se baja desde el borde de arriba).
+    panel: panel::Panel,
     motor: Arc<Mutex<mapeo::Motor>>,
     /// El hilo de raton.rs manda la puntería directo (la ventana no procesa el mouse).
     raton_directo: Arc<AtomicBool>,
@@ -328,6 +331,7 @@ impl Zykro {
             inicio_seg: Instant::now(),
             ajustes: ajustes::Ajustes::new(),
             ajustes_android: ajustes_android::AjustesAndroid::new(),
+            panel: panel::Panel::default(),
             motor,
             raton_directo,
             raton_listo,
@@ -645,6 +649,7 @@ impl Zykro {
             && !self.editor.abierto
             && !self.ajustes.abierto
             && !self.ajustes_android.abierto
+            && !self.panel.abierto()
             && !self.menu.abierto()
             && !self.confirmar_cierre
             && !self.recientes.abierto()
@@ -1008,11 +1013,19 @@ impl Zykro {
 
             if self.editor.abierto {
                 self.teclas_editor(ctx);
-            } else if !en_borde && !self.ajustes.abierto && !self.ajustes_android.abierto && !self.menu.abierto() && !self.confirmar_cierre && !self.recientes.abierto() {
+            } else if !en_borde && !self.ajustes.abierto && !self.ajustes_android.abierto && !self.panel.abierto() && !self.menu.abierto() && !self.confirmar_cierre && !self.recientes.abierto() {
                 self.entrada(ctx, rect, ancho, alto);
             }
             if let Some(recientes::Accion::Inicio) = self.recientes.mostrar(ctx, area, rect, self.pantalla.id()) {
                 self.pulsar(3);
+            }
+            match self.panel.mostrar(ctx, area) {
+                Some(panel::Accion::Captura) => self.captura(),
+                Some(panel::Accion::AjustesAndroid) => self.ajustes_android.abrir(ctx),
+                Some(panel::Accion::PanelAndroid) => {
+                    thread::spawn(|| android::shell("cmd statusbar expand-notifications"));
+                }
+                None => {}
             }
             // Fuera de `entrada` también: que el dedo del scroll nunca se quede abajo.
             if let Some(c) = self.control() {
@@ -1060,8 +1073,9 @@ impl Zykro {
                     }
                 }
                 // El Android de ZYKRO no tiene barra de estado (mide 0, como en BlueStacks), así que el
-                // gesto de bajar el centro de control no tiene de dónde salir: lo hace ZYKRO. Si el toque
-                // empieza en el borde de arriba y baja, se abre; si no baja, se manda como un toque.
+                // gesto de bajar las notificaciones no tiene de dónde salir: lo hace ZYKRO, con su propio
+                // panel (panel.rs). Si el toque empieza en el borde de arriba y baja, se abre; si no
+                // baja, se manda como un toque.
                 Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, .. }
                     if rect.contains(pos) && pos.y - rect.min.y <= BORDE_BARRA =>
                 {
@@ -1069,7 +1083,7 @@ impl Zykro {
                 }
                 Event::PointerMoved(pos) if self.desde_borde.is_some_and(|inicio| pos.y - inicio.y > BAJADA_BARRA) => {
                     self.desde_borde = None;
-                    thread::spawn(|| android::shell("cmd statusbar expand-notifications"));
+                    self.panel.abrir(ctx);
                 }
                 Event::PointerButton { button: PointerButton::Primary, pressed: false, .. } if self.desde_borde.is_some() => {
                     if let Some(inicio) = self.desde_borde.take() {
@@ -1208,6 +1222,9 @@ impl eframe::App for Zykro {
         }
         if std::mem::take(&mut self.estado.lock().unwrap().pedir_ajustes) {
             self.ajustes_android.abrir(ctx);
+        }
+        if std::mem::take(&mut self.estado.lock().unwrap().notificaciones_cambiaron) && self.panel.abierto() {
+            self.panel.recargar(ctx);
         }
         self.ajustes_android.mostrar(ctx, &self.estado);
         if let Some(nueva) = self.ajustes.mostrar(ctx) {

@@ -47,6 +47,8 @@ pub struct Estado {
     pub escribiendo: bool,
     /// El engrane del inicio de ZYKRO pidió abrir los ajustes de Android de ZYKRO.
     pub pedir_ajustes: bool,
+    /// Cambiaron las notificaciones (las exporta la pantalla de inicio de ZYKRO).
+    pub notificaciones_cambiaron: bool,
 }
 
 pub type EstadoCompartido = Arc<Mutex<Estado>>;
@@ -290,6 +292,7 @@ fn asegurar_inicio() {
         let ruta = Command::new("docker").args(["exec", CONTENEDOR, "pm", "path", INICIO]).output();
         let estaba = ruta.is_ok_and(|s| String::from_utf8_lossy(&s.stdout).contains("package:"));
         if estaba && std::fs::read_to_string(&marca).is_ok_and(|m| m == firma) {
+            permisos_inicio();
             return;
         }
         let destino = "/data/local/tmp/zykro-inicio.apk";
@@ -316,7 +319,16 @@ fn asegurar_inicio() {
             docker(&["exec", CONTENEDOR, "input", "keyevent", "3"]);
         }
         let _ = std::fs::write(&marca, firma);
+        permisos_inicio();
     });
+}
+
+/// La pantalla de inicio escucha las notificaciones para el panel de ZYKRO, y las abre aunque esté
+/// detrás de otra app (el permiso de mostrarse encima la exime de esa restricción de Android).
+fn permisos_inicio() {
+    shell(&format!(
+        "cmd notification allow_listener {INICIO}/{INICIO}.Escucha; appops set {INICIO} SYSTEM_ALERT_WINDOW allow"
+    ));
 }
 
 /// Usa teclado-android (`bin/` de este repositorio) para que Android no muestre su teclado en pantalla.
@@ -343,7 +355,7 @@ fn ocultar_teclado_en_pantalla() {
 }
 
 /// Escucha lo que la pantalla de inicio de ZYKRO pide por el registro de Android (etiqueta `ZYKRO`):
-/// por ahora, abrir los ajustes de Android de ZYKRO al tocar su engrane.
+/// abrir los ajustes de Android de ZYKRO al tocar su engrane, y avisar que cambiaron las notificaciones.
 pub fn vigilar_peticiones(ctx: egui::Context, estado: EstadoCompartido) {
     use std::io::{BufRead, BufReader};
     thread::Builder::new()
@@ -358,10 +370,12 @@ pub fn vigilar_peticiones(ctx: egui::Context, estado: EstadoCompartido) {
                 .spawn();
             if let Ok(mut hijo) = hijo {
                 for linea in BufReader::new(hijo.stdout.take().unwrap()).lines().map_while(Result::ok) {
-                    if linea.trim() == "ajustes" {
-                        estado.lock().unwrap().pedir_ajustes = true;
-                        ctx.request_repaint();
+                    match linea.trim() {
+                        "ajustes" => estado.lock().unwrap().pedir_ajustes = true,
+                        "notificaciones" => estado.lock().unwrap().notificaciones_cambiaron = true,
+                        _ => continue,
                     }
+                    ctx.request_repaint();
                 }
                 let _ = hijo.wait();
             }

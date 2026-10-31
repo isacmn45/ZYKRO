@@ -525,7 +525,7 @@ fn carpeta_iconos() -> PathBuf {
         .join("zykro/iconos")
 }
 
-fn leer_png(ruta: &Path) -> Option<ColorImage> {
+pub(crate) fn leer_png(ruta: &Path) -> Option<ColorImage> {
     let archivo = std::io::BufReader::new(std::fs::File::open(ruta).ok()?);
     let mut decodificador = png::Decoder::new(archivo);
     decodificador.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
