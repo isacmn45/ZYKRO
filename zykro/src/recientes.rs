@@ -219,19 +219,19 @@ impl Recientes {
                 let arrastrando = self.eje == Some(Eje::Vertical);
                 let subida = *self.subidas.get(&clave).unwrap_or(&0.0);
                 let mut dy = ctx.animate_value_with_time(Id::new(("recientes-y", clave)), subida, if arrastrando { 0.0 } else { 0.15 });
-                let mut opacidad = t;
+                // Al soltarla sale hacia arriba acelerando, como en Android, y se desvanece.
+                let mut salida = 1.0;
                 if let Some(desde) = self.saliendo.get(&clave) {
                     let avance = ((ahora - *desde).as_secs_f32() / SALIDA.as_secs_f32()).min(1.0);
-                    dy = subida - avance * area.height();
-                    opacidad *= 1.0 - avance;
+                    dy = subida - easing::quadratic_in(avance) * area.height();
+                    salida = 1.0 - avance;
                 }
 
                 // La tarjeta en foco viaja entre la pantalla completa y su lugar; las demás aparecen.
-                let rect = if es_foco { lerp_rect(imagen, destino, t) } else { destino.translate(Vec2::new(0.0, dy)) };
+                // Todas siguen al mouse hacia arriba (también la de la app abierta).
+                let rect = if es_foco { lerp_rect(imagen, destino, t) } else { destino }.translate(Vec2::new(0.0, dy));
                 let redondeo = if es_foco { REDONDEO * t } else { REDONDEO };
-                if !es_foco {
-                    opacidad *= t;
-                }
+                let opacidad = if es_foco { t * salida } else { t * t * salida };
                 if rect.max.x < area.min.x - 10.0 || rect.min.x > area.max.x + 10.0 {
                     continue;
                 }
@@ -241,7 +241,8 @@ impl Recientes {
                 let titulo = Pos2::new(rect.center().x, rect.min.y - 16.0);
                 p.text(titulo, Align2::CENTER_CENTER, &nombre, FontId::proportional(14.0), TEXTO.gamma_multiply(opacidad * t));
 
-                let tinte = Color32::WHITE.gamma_multiply(if es_foco { 1.0 } else { opacidad });
+                // La imagen en foco no se desvanece al abrir o cerrar el selector, solo al salir.
+                let tinte = Color32::WHITE.gamma_multiply(if es_foco { salida } else { opacidad });
                 match (tarjeta.vivo, video, self.texturas.get(&tarjeta.paquete)) {
                     (true, Some(id), _) => {
                         egui::Image::from_texture(egui::load::SizedTexture::new(id, rect.size()))
