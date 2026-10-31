@@ -53,6 +53,10 @@ pub struct Estado {
     pub pedir_fondos: bool,
     /// La pantalla de inicio cambió su fondo de pantalla.
     pub fondo_cambio: bool,
+    /// Se instaló, quitó o actualizó una app (para los accesos directos).
+    pub apps_cambiaron: bool,
+    /// Respaldo que hay que restaurar antes de encender Android (Configuración › Datos del usuario).
+    pub restaurar: Option<PathBuf>,
 }
 
 pub type EstadoCompartido = Arc<Mutex<Estado>>;
@@ -116,6 +120,19 @@ pub fn iniciar(ctx: egui::Context, estado: EstadoCompartido, destino: Compartido
     thread::Builder::new()
         .name("zykro-android".into())
         .spawn(move || {
+            let respaldo = estado.lock().unwrap().restaurar.take();
+            if let Some(respaldo) = respaldo {
+                mensaje(&estado, Etapa::Encender, "Restaurando el respaldo… (puede tardar unos minutos)");
+                ctx.request_repaint();
+                match crate::datos::restaurar(&respaldo) {
+                    Ok(()) => avisar(&estado, "Respaldo restaurado"),
+                    Err(e) => {
+                        error(&estado, format!("No se pudo restaurar el respaldo: {e}"));
+                        ctx.request_repaint();
+                        thread::sleep(Duration::from_secs(5));
+                    }
+                }
+            }
             let mut pendiente = estado.lock().unwrap().reinicio.take();
             // Contenedores creados antes de la batería fija, o con una imagen de Android más vieja que
             // la que dejó instalar.sh: se recrean (mismos datos) si Android está apagado, para no
@@ -130,10 +147,20 @@ pub fn iniciar(ctx: egui::Context, estado: EstadoCompartido, destino: Compartido
             if let Some(nueva) = pendiente {
                 mensaje(&estado, Etapa::Encender, "Reiniciando Android con la nueva configuración…");
                 ctx.request_repaint();
-                if let Err(e) = recrear(&nueva) {
-                    error(&estado, format!("No se pudo aplicar la configuración: {e}"));
-                    ctx.request_repaint();
-                    thread::sleep(Duration::from_secs(4));
+                match recrear(&nueva) {
+                    // El contenedor nuevo nace sin el límite de núcleos del modo: se vuelve a aplicar.
+                    Ok(()) => {
+                        let (modo, nucleos) = {
+                            let s = estado.lock().unwrap();
+                            (s.config.modo, s.config.nucleos)
+                        };
+                        crate::rendimiento::aplicar(modo, nucleos);
+                    }
+                    Err(e) => {
+                        error(&estado, format!("No se pudo aplicar la configuración: {e}"));
+                        ctx.request_repaint();
+                        thread::sleep(Duration::from_secs(4));
+                    }
                 }
             }
             loop {
@@ -249,6 +276,15 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
     poner_zona_horaria();
     asegurar_inicio();
     quitar_sobrantes();
+    let config = estado.lock().unwrap().config.clone();
+    aplicar_preferencias(&config);
+    if config.accesos_directos {
+        thread::spawn(|| crate::accesos::sincronizar(true));
+    }
+    // Abierto desde un acceso directo de una app: se abre en cuanto Android está listo.
+    if let Some(paquete) = ABRIR_AL_INICIAR.lock().unwrap().take() {
+        thread::spawn(move || abrir_app(&paquete));
+    }
 
     let ctx2 = ctx.clone();
     video::recibir_cuadros(socket_video, destino.clone(), move || {
@@ -461,6 +497,7 @@ pub fn vigilar_peticiones(ctx: egui::Context, estado: EstadoCompartido) {
                     match linea.trim() {
                         "fondos" => estado.lock().unwrap().pedir_fondos = true,
                         "fondo" => estado.lock().unwrap().fondo_cambio = true,
+                        "apps" => estado.lock().unwrap().apps_cambiaron = true,
                         "notificaciones" => estado.lock().unwrap().notificaciones_cambiaron = true,
                         "emergente" => {
                             let mut estado = estado.lock().unwrap();
@@ -592,6 +629,34 @@ pub fn abrir_app(paquete: &str) {
     docker(&["exec", CONTENEDOR, "sh", "-c", &orden]);
 }
 
+/// App que hay que abrir en cuanto Android esté listo (ZYKRO se abrió desde su acceso directo).
+pub static ABRIR_AL_INICIAR: Mutex<Option<String>> = Mutex::new(None);
+
+/// Lo de Configuración que se aplica en Android sin reiniciarlo: la operadora, el sonido al tocar y
+/// ADB (Android lo olvida al reiniciarse, así que se aplica cada vez que arranca).
+pub fn aplicar_preferencias(config: &config::Config) {
+    let mut adb = if config.adb { "setprop service.adb.tcp.port 5555; setprop ctl.start adbd".to_string() } else { "setprop ctl.stop adbd".into() };
+    // La llave de `adb` de la laptop queda autorizada: sin esto, Android pide aceptarla (como un
+    // teléfono con la depuración USB) y adb dice «unauthorized».
+    let llave = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".android/adbkey")).and_then(|privada| {
+        std::fs::read_to_string(privada.with_extension("pub"))
+            .ok()
+            .or_else(|| Command::new("adb").arg("pubkey").arg(&privada).output().ok().map(|s| String::from_utf8_lossy(&s.stdout).into_owned()))
+    });
+    if let Some(llave) = llave.map(|l| l.trim().to_string()).filter(|l| config.adb && !l.is_empty() && !l.contains('\'')) {
+        adb = format!(
+            "k='{llave}'; f=/data/misc/adb/adb_keys; mkdir -p /data/misc/adb; touch $f; grep -qF \"$k\" $f || echo \"$k\" >> $f; \
+             chown system:shell $f; chmod 640 $f; {adb}"
+        );
+    }
+    let orden = format!(
+        "{}; settings put system sound_effects_enabled {}; {adb}",
+        crate::telefono::orden_operadora(config.operadora.as_deref()),
+        config.sonido_toques as u8
+    );
+    thread::spawn(move || shell(&orden));
+}
+
 /// Cierra una app quitando su tarea raíz.
 pub fn cerrar_tarea(raiz: u32) {
     docker(&["exec", CONTENEDOR, "am", "stack", "remove", &raiz.to_string()]);
@@ -665,10 +730,16 @@ fn comando_run(info: &serde_json::Value, nueva: &config::Android) -> Result<Vec<
     let entrada = cadenas(&cfg["Entrypoint"]);
     let mut args: Vec<String> = entrada.iter().skip(1).cloned().chain(cadenas(&cfg["Cmd"])).collect();
     for (clave, valor) in nueva.argumentos() {
-        let nuevo = format!("{clave}={valor}");
-        match args.iter_mut().find(|a| a.split_once('=').map(|(k, _)| k) == Some(clave)) {
-            Some(a) => *a = nuevo,
-            None => args.push(nuevo),
+        let es_esta = |a: &String| a.split_once('=').map(|(k, _)| k) == Some(clave.as_str());
+        match valor {
+            Some(valor) => {
+                let nuevo = format!("{clave}={valor}");
+                match args.iter_mut().find(|a| es_esta(a)) {
+                    Some(a) => *a = nuevo,
+                    None => args.push(nuevo),
+                }
+            }
+            None => args.retain(|a| !es_esta(a)),
         }
     }
 

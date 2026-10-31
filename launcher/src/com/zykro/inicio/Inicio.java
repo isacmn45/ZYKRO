@@ -54,8 +54,10 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.text.Collator;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -329,11 +331,18 @@ public class Inicio extends Activity implements TextWatcher {
                     a.icono.compress(Bitmap.CompressFormat.PNG, 100, salida);
                 }
             }
+            // ZYKRO actualiza los accesos directos de las apps cuando la lista cambia.
+            byte[] nueva = todas.toString().getBytes(StandardCharsets.UTF_8);
+            File json = new File(carpeta, "apps.json");
+            boolean cambio = !json.exists() || !Arrays.equals(nueva, Files.readAllBytes(json.toPath()));
             File temporal = new File(carpeta, "apps.json.tmp");
             try (FileOutputStream salida = new FileOutputStream(temporal)) {
-                salida.write(todas.toString().getBytes(StandardCharsets.UTF_8));
+                salida.write(nueva);
             }
-            temporal.renameTo(new File(carpeta, "apps.json"));
+            temporal.renameTo(json);
+            if (cambio) {
+                Log.i(ETIQUETA, "apps");
+            }
         } catch (IOException | JSONException e) {
             Log.w(ETIQUETA, "no se pudo guardar la lista de apps", e);
         }

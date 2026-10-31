@@ -1,6 +1,7 @@
 //! Configuración de ZYKRO. Las preferencias de la app se guardan en ~/.config/zykro/config.json;
 //! la de Android vive en los argumentos de arranque del contenedor y se lee de ahí.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -14,10 +15,42 @@ pub struct Config {
     pub modo: crate::rendimiento::Modo,
     pub ocultar_teclado: bool,
     pub android: Android,
+    /// Núcleos de la CPU para Android; `None` = los del modo de rendimiento.
+    pub nucleos: Option<usize>,
+    /// Tamaño de la interfaz de ZYKRO (1 = normal).
+    pub escala: f32,
+    /// Sobre la imagen, el cursor de ZYKRO (grande y de color, se ve sobre cualquier juego).
+    pub cursor_zykro: bool,
+    /// Apps que se ponen en pantalla completa al abrirlas.
+    pub pantalla_completa: Vec<String>,
+    /// Salida de sonido de PipeWire o PulseAudio; `None` = la del sistema.
+    pub salida_sonido: Option<String>,
+    /// El sonido de Android al tocar la pantalla.
+    pub sonido_toques: bool,
+    /// Esc sale de la pantalla completa y suelta el mouse (si no, llega a Android como Atrás).
+    pub esc_sale: bool,
+    /// Avisar en el escritorio de las notificaciones de Android cuando ZYKRO no está al frente.
+    pub notificaciones_escritorio: bool,
+    /// Un acceso directo en el menú de aplicaciones por cada app instalada.
+    pub accesos_directos: bool,
+    /// Dónde se guardan las capturas; `None` = ~/Imágenes/ZYKRO.
+    pub carpeta_capturas: Option<PathBuf>,
+    /// Código de la operadora que anuncia Android (`telefono::OPERADORAS`); `None` = ninguna.
+    pub operadora: Option<String>,
+    /// Teclas de los atajos, por acción (ver `atajos.rs`); las que faltan usan la de siempre.
+    pub atajos: BTreeMap<String, String>,
+    /// Android Debug Bridge, para conectarse con `adb`.
+    pub adb: bool,
+    /// Los mandos de la laptop llegan a Android (`gamepad.rs`).
+    pub gamepad: bool,
+    /// Y la vibración que piden los juegos llega a los mandos.
+    pub vibracion: bool,
 }
 
 /// Argumento de arranque para que Android use una batería falsa fija (ver `Android::argumentos`).
 pub const BATERIA_FIJA: &str = "androidboot.fake_battery";
+const VULKAN: &str = "ro.hardware.vulkan";
+const NODO_GPU: &str = "androidboot.redroid_gpu_node";
 
 /// Lo que se aplica reiniciando Android.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -29,6 +62,12 @@ pub struct Android {
     pub fps: u32,
     pub lod_activado: bool,
     pub lod: f32,
+    /// Vulkan para las apps; sin él, solo OpenGL ES.
+    pub vulkan: bool,
+    /// Teléfono que anuncia Android (`telefono::PERFILES`); `None` = otro, no se toca.
+    pub perfil: Option<usize>,
+    /// GPU que usa Android (`/dev/dri/renderD…`); `None` = la primera que sirva.
+    pub gpu: Option<String>,
 }
 
 impl Default for Config {
@@ -39,13 +78,28 @@ impl Default for Config {
             modo: crate::rendimiento::Modo::default(),
             ocultar_teclado: true,
             android: Android::default(),
+            nucleos: None,
+            escala: 1.0,
+            cursor_zykro: false,
+            pantalla_completa: Vec::new(),
+            salida_sonido: None,
+            sonido_toques: false,
+            esc_sale: false,
+            notificaciones_escritorio: true,
+            accesos_directos: false,
+            carpeta_capturas: None,
+            operadora: None,
+            atajos: BTreeMap::new(),
+            adb: false,
+            gamepad: true,
+            vibracion: true,
         }
     }
 }
 
 impl Default for Android {
     fn default() -> Self {
-        Android { ancho: 1280, alto: 720, dpi: 240, fps: 60, lod_activado: true, lod: 0.5 }
+        Android { ancho: 1280, alto: 720, dpi: 240, fps: 60, lod_activado: true, lod: 0.5, vulkan: true, perfil: Some(0), gpu: None }
     }
 }
 
@@ -82,9 +136,9 @@ impl Config {
 }
 
 impl Android {
-    /// Valores de los argumentos de arranque del contenedor que maneja ZYKRO.
-    pub fn argumentos(&self) -> Vec<(&'static str, String)> {
-        vec![
+    /// Valores de los argumentos de arranque del contenedor que maneja ZYKRO (`None` = quitarlo).
+    pub fn argumentos(&self) -> Vec<(String, Option<String>)> {
+        let mut args: Vec<(String, Option<String>)> = [
             ("androidboot.redroid_width", self.ancho.to_string()),
             ("androidboot.redroid_height", self.alto.to_string()),
             ("androidboot.redroid_dpi", self.dpi.to_string()),
@@ -96,6 +150,16 @@ impl Android {
             // cargador, se apagaba solo («shutdown,battery»).
             (BATERIA_FIJA, "1".into()),
         ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), Some(v)))
+        .collect();
+        // Sin Vulkan: el script de la GPU de Android ya no puede ponerlo (las `ro.` se escriben una vez).
+        args.push((VULKAN.into(), (!self.vulkan).then(|| "none".into())));
+        args.push((NODO_GPU.into(), self.gpu.clone()));
+        if let Some(perfil) = self.perfil.and_then(|i| crate::telefono::PERFILES.get(i)) {
+            args.extend(perfil.argumentos().into_iter().map(|(k, v)| (k, Some(v))));
+        }
+        args
     }
 
     pub fn desde_argumentos(args: &[String]) -> Android {
@@ -109,9 +173,12 @@ impl Android {
                 "androidboot.redroid_fps" => a.fps = valor.parse().unwrap_or(a.fps),
                 "debug.mesa.swag.lod.bias.enabled" => a.lod_activado = valor == "1",
                 "debug.mesa.swag.lod.bias" => a.lod = valor.parse().unwrap_or(a.lod),
+                VULKAN => a.vulkan = valor != "none",
+                NODO_GPU => a.gpu = Some(valor.to_string()),
                 _ => {}
             }
         }
+        a.perfil = crate::telefono::Perfil::desde_argumentos(args);
         a
     }
 }

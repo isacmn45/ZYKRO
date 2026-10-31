@@ -15,11 +15,29 @@ como la de BlueStacks.
 - **Puntería como BlueStacks:** el mouse se lee directo (evdev) y la cámara usa la misma fórmula que
   BlueStacks 5, así que la sensibilidad se siente igual. `` ` `` suspende o activa la puntería.
 - **Sonido** de Android.
-- **Modos de rendimiento:** perfil de energía, núcleos y prioridad de Android, y una velocidad mínima
-  para la GPU Intel, que evita los tirones cuando la GPU baja de velocidad (en AMD, Ultra la deja al
-  máximo).
-- **Pantalla:** resolución, DPI y FPS de Android; pantalla completa con FPS y temperatura en una esquina;
-  la ventana mantiene la proporción de la imagen al cambiar de tamaño.
+- **Configuración con las secciones de BlueStacks 5**, solo con lo que de verdad funciona aquí:
+  - *Rendimiento:* modos (perfil de energía, prioridad de Android y una velocidad mínima para la GPU
+    Intel, que evita los tirones; en AMD, Ultra la deja al máximo), núcleos para Android y FPS
+    (hasta 240).
+  - *Pantalla:* orientación, resolución y DPI (también personalizados), tamaño de la interfaz de
+    ZYKRO y un cursor propio, grande y visible sobre cualquier juego.
+  - *Gráficos:* Vulkan y OpenGL o solo OpenGL, la GPU de Android (con dos) y texturas suaves.
+  - *Juegos:* las apps que abren ZYKRO en pantalla completa.
+  - *Dispositivos* y *Gamepad:* la salida de sonido, y los mandos de la laptop (USB o Bluetooth)
+    llegan a Android como mandos propios, con sus botones en su lugar y vibración.
+  - *Preferencias:* sonido al tocar, Esc para salir de la pantalla completa, notificaciones de
+    Android en el escritorio, accesos directos de las apps en el menú de la laptop y la carpeta de
+    capturas.
+  - *Teléfono:* el modelo que dice ser Android (Sony, Samsung, ASUS ROG, OnePlus, Xiaomi, Pixel) y la
+    operadora de telefonía.
+  - *Atajos:* las teclas de cada acción (ocultar ZYKRO, captura, volumen, inicio, controles…).
+  - *Datos del usuario:* limpieza del disco y respaldo y restauración de todo Android en un archivo.
+  - *Avanzado* y *Acerca de:* las arquitecturas, ADB (se autoriza solo) y buscar actualizaciones.
+
+  No están la cámara ni el micrófono (este Android no los tiene) ni la memoria (Android comparte la de
+  la laptop).
+- **Pantalla completa** con FPS y temperatura en una esquina; la ventana mantiene la proporción de la
+  imagen al cambiar de tamaño. La pantalla de carga es un cielo con planetas, como la de BlueStacks.
 - **Pantalla de inicio propia**, al estilo de BlueStacks 5 y compacta: buscador, tus apps y juegos, y
   una carpeta con las del sistema. Mantener presionado un espacio vacío abre los **fondos de
   pantalla**: doce fondos de ZYKRO, una imagen de tu computadora o una de la galería de Android

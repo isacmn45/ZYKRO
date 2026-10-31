@@ -14,6 +14,8 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -36,6 +38,43 @@ const ENTRADAS: usize = 0x40;
 const BUFER_MS: u32 = 60;
 /// Si el retraso total pasa de esto, se tiran bloques.
 const RETRASO_MAX_MS: u64 = 120;
+
+/// Salida de sonido elegida en Configuración › Dispositivos (`None` = la del sistema).
+static SALIDA: Mutex<Option<String>> = Mutex::new(None);
+/// Cambió la salida: hay que volver a abrirla.
+static CAMBIO: AtomicBool = AtomicBool::new(false);
+/// Sin sonido (atajo de silenciar, o ZYKRO oculto con su atajo).
+static SILENCIO: AtomicBool = AtomicBool::new(false);
+
+/// Usa otra salida de sonido (el nombre de PipeWire o PulseAudio); `None` = la del sistema.
+pub fn usar_salida(salida: Option<String>) {
+    let mut actual = SALIDA.lock().unwrap();
+    if *actual != salida {
+        *actual = salida;
+        CAMBIO.store(true, Ordering::Relaxed);
+    }
+}
+
+pub fn silenciar(silencio: bool) {
+    SILENCIO.store(silencio, Ordering::Relaxed);
+}
+
+pub fn silenciado() -> bool {
+    SILENCIO.load(Ordering::Relaxed)
+}
+
+/// Las salidas de sonido de la laptop: nombre interno y descripción.
+pub fn salidas() -> Vec<(String, String)> {
+    let salida = Command::new("pactl").args(["-f", "json", "list", "sinks"]).output();
+    let lista = salida.ok().and_then(|s| serde_json::from_slice::<serde_json::Value>(&s.stdout).ok());
+    lista
+        .as_ref()
+        .and_then(|l| l.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|s| Some((s["name"].as_str()?.to_string(), s["description"].as_str().unwrap_or("").to_string())))
+        .collect()
+}
 
 struct Formato {
     frecuencia: u32,
@@ -96,6 +135,10 @@ fn sesion(ultimo_reinicio: &mut Option<Instant>) -> io::Result<()> {
         }
         // Sin salida de sonido se sigue leyendo (y tirando) el anillo: si se cerrara el socket, el
         // servidor se quedaría esperando a un cliente muerto.
+        if CAMBIO.swap(false, Ordering::Relaxed) {
+            salida = None;
+            reintentar = Instant::now();
+        }
         if salida.is_none() && Instant::now() >= reintentar {
             match abrir_salida(&formato) {
                 Ok(s) => salida = Some(s),
@@ -118,6 +161,9 @@ fn sesion(ultimo_reinicio: &mut Option<Instant>) -> io::Result<()> {
             }
             leido = siguiente;
             let Some(s) = &salida else { continue };
+            if SILENCIO.load(Ordering::Relaxed) {
+                continue;
+            }
             // Los relojes de Android y de la tarjeta de sonido no van exactos: si el sonido se va
             // acumulando, se tira un bloque para que no se retrase.
             if s.get_latency().is_ok_and(|l| l.0 > RETRASO_MAX_MS * 1000) {
@@ -138,7 +184,8 @@ fn abrir_salida(f: &Formato) -> Result<Simple, PAErr> {
     let spec = Spec { format: SampleFormat::S16le, rate: f.frecuencia, channels: f.canales as u8 };
     let ms = |n: u32| spec.usec_to_bytes(MicroSeconds(n as u64 * 1000)) as u32;
     let atributos = BufferAttr { maxlength: u32::MAX, tlength: ms(BUFER_MS), prebuf: ms(BUFER_MS * 2 / 3), minreq: ms(10), fragsize: u32::MAX };
-    Simple::new(None, "ZYKRO", Direction::Playback, None, "Android", &spec, None, Some(&atributos))
+    let dispositivo = SALIDA.lock().unwrap().clone();
+    Simple::new(None, "ZYKRO", Direction::Playback, dispositivo.as_deref(), "Android", &spec, None, Some(&atributos))
 }
 
 /// Conecta sin quedarse colgado: si el servidor no acepta (cola llena), connect() bloquearía para siempre.

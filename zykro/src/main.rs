@@ -1,17 +1,21 @@
 //! ZYKRO: ventana propia para el Android de SwagPlayer (redroid + swag-rust-server).
 //! Diseño inspirado en LDPlayer: barra de título oscura y barra lateral delgada con herramientas.
 
+mod accesos;
 mod ajustes;
 mod ajustes_android;
 mod android;
+mod atajos;
 mod audio;
 mod carga;
 mod cierre;
 mod config;
+mod datos;
 mod control;
 mod curva;
 mod editor;
 mod fondos;
+mod gamepad;
 mod mapeo;
 mod menu;
 mod panel;
@@ -21,6 +25,7 @@ mod rendimiento;
 mod ritmo;
 mod rueda;
 mod sensores;
+mod telefono;
 mod textura;
 mod video;
 
@@ -75,11 +80,25 @@ const ACENTO: Color32 = Color32::from_rgb(0xa8, 0x55, 0xf7);
 const AVISO: Color32 = Color32::from_rgb(0xf5, 0x9e, 0x0b);
 /// Argumento con el que ZYKRO se vuelve a abrir para recrear Android con la configuración guardada.
 const APLICAR_ANDROID: &str = "--aplicar-android";
+/// Reabrir ZYKRO restaurando antes un respaldo de Android (`--restaurar archivo.tar`).
+const RESTAURAR: &str = "--restaurar";
 /// Ícono de la app, generado desde desktop/zykro.svg con `rsvg-convert -w 256 -h 256`.
 const ICONO_PNG: &[u8] = include_bytes!("../assets/icono.png");
 
 fn main() -> eframe::Result {
     registrar_en_archivo();
+    // Desde el acceso directo de una app (`--abrir paquete`): si ZYKRO ya está abierto, solo se abre
+    // la app en Android; si no, ZYKRO se abre y la abre cuando Android esté listo.
+    if let Some(paquete) = std::env::args().skip_while(|a| a != "--abrir").nth(1) {
+        if !tomar_instancia(false) {
+            android::abrir_app(&paquete);
+            return Ok(());
+        }
+        *android::ABRIR_AL_INICIAR.lock().unwrap() = Some(paquete);
+    } else {
+        // Al reabrirse para aplicar la configuración, la ventana anterior lo suelta al cerrarse.
+        thread::spawn(|| tomar_instancia(true));
+    }
     let opciones = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(NOMBRE)
@@ -221,6 +240,16 @@ struct Zykro {
     /// Ajustes de Android de ZYKRO (el botón «Ajustes» del panel de notificaciones).
     ajustes_android: ajustes_android::AjustesAndroid,
     fondos: fondos::Fondos,
+    /// Los controles del juego apagados con su atajo.
+    controles_apagados: bool,
+    /// Oculto con su atajo (minimizado y en silencio); `Some(true)` cuando ya perdió el foco.
+    oculto: Option<bool>,
+    /// La app que estaba al frente (para la pantalla completa al abrir un juego).
+    app_anterior: Option<String>,
+    /// Dónde se dibujó la imagen de Android en el último cuadro (para el cursor de ZYKRO).
+    rect_imagen: Rect,
+    /// Respaldo que la ventana nueva tiene que restaurar al reabrirse.
+    restaurar: Option<PathBuf>,
     /// Panel de notificaciones al estilo de Android 4 (se baja desde el borde de arriba).
     panel: panel::Panel,
     motor: Arc<Mutex<mapeo::Motor>>,
@@ -297,8 +326,14 @@ impl Zykro {
         // Reabierto tras cambiar la configuración de Android: lo primero es recrearlo con ella.
         let aplicar = std::env::args().any(|a| a == APLICAR_ANDROID);
         let config = config::Config::cargar(aplicar);
+        let restaurar = std::env::args().skip_while(|a| a != RESTAURAR).nth(1).map(PathBuf::from);
+        cc.egui_ctx.set_zoom_factor(config.escala);
+        audio::usar_salida(config.salida_sonido.clone());
+        gamepad::ACTIVO.store(config.gamepad, Ordering::Relaxed);
+        gamepad::VIBRACION.store(config.vibracion, Ordering::Relaxed);
         let estado: android::EstadoCompartido = Arc::new(Mutex::new(android::Estado {
             reinicio: aplicar.then(|| config.android.clone()),
+            restaurar,
             config,
             ..Default::default()
         }));
@@ -307,7 +342,10 @@ impl Zykro {
         android::vigilar_texto(cc.egui_ctx.clone(), estado.clone());
         android::vigilar_peticiones(cc.egui_ctx.clone(), estado.clone());
         audio::iniciar();
-        aplicar_modo(&estado, estado.lock().unwrap().config.modo, false);
+        gamepad::iniciar();
+        // En su propia línea: el candado del estado se suelta antes (aplicar_modo vuelve a tomarlo).
+        let modo = estado.lock().unwrap().config.modo;
+        aplicar_modo(&estado, modo, false);
         let motor = Arc::new(Mutex::new(mapeo::Motor::new()));
         let raton_directo = Arc::new(AtomicBool::new(false));
         let raton_listo = Arc::new(AtomicBool::new(false));
@@ -334,6 +372,11 @@ impl Zykro {
             ajustes: ajustes::Ajustes::new(),
             ajustes_android: ajustes_android::AjustesAndroid::new(),
             fondos: fondos::Fondos::default(),
+            controles_apagados: false,
+            oculto: None,
+            app_anterior: None,
+            rect_imagen: Rect::NOTHING,
+            restaurar: None,
             panel: panel::Panel::default(),
             motor,
             raton_directo,
@@ -374,10 +417,145 @@ impl Zykro {
             ctx.send_viewport_cmd(ViewportCommand::Close);
             return;
         }
-        if nueva.modo != anterior.modo {
+        ctx.set_zoom_factor(nueva.escala);
+        audio::usar_salida(nueva.salida_sonido.clone());
+        gamepad::ACTIVO.store(nueva.gamepad, Ordering::Relaxed);
+        gamepad::VIBRACION.store(nueva.vibracion, Ordering::Relaxed);
+        android::aplicar_preferencias(&nueva);
+        if nueva.accesos_directos != anterior.accesos_directos {
+            let activar = nueva.accesos_directos;
+            thread::spawn(move || accesos::sincronizar(activar));
+        }
+        if nueva.modo != anterior.modo || nueva.nucleos != anterior.nucleos {
             aplicar_modo(&self.estado, nueva.modo, true);
         } else {
             android::avisar(&self.estado, "Configuración guardada");
+        }
+    }
+
+    /// Lo que hace cada atajo de teclado (Configuración › Atajos).
+    fn atajo(&mut self, ctx: &egui::Context, accion: atajos::Accion) {
+        use atajos::Accion;
+        match accion {
+            Accion::Ocultar => {
+                audio::silenciar(true);
+                self.oculto = Some(false);
+                ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
+            }
+            Accion::PantallaCompleta => alternar_pantalla_completa(ctx),
+            Accion::Configuracion => self.abrir_ajustes(),
+            Accion::Captura => self.captura(),
+            Accion::SubirVolumen => self.pulsar(24),
+            Accion::BajarVolumen => self.pulsar(25),
+            Accion::Silenciar => {
+                let silencio = !audio::silenciado();
+                audio::silenciar(silencio);
+                android::avisar(&self.estado, if silencio { "Sonido silenciado" } else { "Sonido activado" });
+            }
+            Accion::Inicio => {
+                self.panel.cerrar();
+                self.pulsar(3);
+            }
+            Accion::Atras if self.panel.abierto() => self.panel.cerrar(),
+            Accion::Atras => self.pulsar(4),
+            Accion::Recientes => self.alternar_recientes(ctx),
+            Accion::Notificaciones if self.panel.abierto() => self.panel.cerrar(),
+            Accion::Notificaciones => self.panel.abrir(ctx),
+            Accion::InstalarApk => android::instalar_apk(self.estado.clone()),
+            Accion::Fondos => self.fondos.abrir(ctx),
+            Accion::Editor => self.abrir_editor(),
+            Accion::Controles => {
+                self.controles_apagados = !self.controles_apagados;
+                let aviso = if self.controles_apagados { "Controles del juego desactivados" } else { "Controles del juego activados" };
+                android::avisar(&self.estado, aviso);
+            }
+            Accion::Guia => self.alternar_guia(),
+            Accion::CarpetaCapturas => abrir_carpeta_capturas(&self.config()),
+        }
+    }
+
+    /// Al volver de ocultar ZYKRO con su atajo, vuelve el sonido.
+    fn revisar_oculto(&mut self, ctx: &egui::Context) {
+        let enfocada = ctx.input(|i| i.focused);
+        match self.oculto {
+            Some(false) if !enfocada => self.oculto = Some(true),
+            Some(true) if enfocada => {
+                self.oculto = None;
+                audio::silenciar(false);
+            }
+            _ => {}
+        }
+    }
+
+    fn alternar_recientes(&mut self, ctx: &egui::Context) {
+        if self.control().is_none() {
+            return;
+        }
+        // Antes de abrir, la miniatura más nueva de la app que está al frente.
+        if !self.recientes.abierto() {
+            if let (Some(app), Some(cuadro)) = (android::app_activa(), &self.cuadro) {
+                self.recientes.guardar_miniatura(&app, cuadro);
+            }
+        }
+        self.recientes.alternar(ctx);
+    }
+
+    /// Muestra u oculta la guía de teclas sobre el juego y lo guarda en su mapa.
+    fn alternar_guia(&mut self) {
+        let cambio = {
+            let mut m = self.motor();
+            let paquete = m.paquete.clone();
+            m.mapa.as_mut().map(|mapa| {
+                mapa.overlay.enabled = !mapa.overlay.enabled;
+                (paquete, mapa.clone())
+            })
+        };
+        let Some((paquete, mapa)) = cambio else {
+            android::avisar(&self.estado, "Este juego todavía no tiene controles");
+            return;
+        };
+        if !paquete.is_empty() {
+            let _ = mapa.guardar(&paquete);
+        }
+        android::avisar(&self.estado, if mapa.overlay.enabled { "Guía de teclas visible" } else { "Guía de teclas oculta" });
+    }
+
+    /// El texto de ayuda de un botón con su atajo: «Captura de pantalla (Ctrl+Shift+S)».
+    fn ayuda(&self, nombre: &str, accion: atajos::Accion) -> String {
+        match atajos::de(&self.estado.lock().unwrap().config.atajos, accion) {
+            t if t == "Sin atajo" => nombre.to_string(),
+            t => format!("{nombre} ({t})"),
+        }
+    }
+
+    /// El cursor de ZYKRO sobre la imagen (Configuración › Pantalla): grande y de color, se ve sobre
+    /// cualquier juego. Sobre ventanas y menús de ZYKRO queda el del sistema.
+    fn cursor_propio(&self, ctx: &egui::Context) {
+        if !self.estado.lock().unwrap().config.cursor_zykro || self.cursor_bloqueado {
+            return;
+        }
+        let Some(pos) = ctx.input(|i| i.pointer.hover_pos()) else { return };
+        if !self.rect_imagen.contains(pos) || ctx.layer_id_at(pos).is_some_and(|l| l.order != egui::Order::Background) {
+            return;
+        }
+        ctx.set_cursor_icon(egui::CursorIcon::None);
+        let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("cursor-zykro")));
+        // Una flecha (cabeza y cola, cada una convexa) con borde blanco y sombra.
+        let e = 1.35;
+        let punto = |x: f32, y: f32| pos + Vec2::new(x, y) * e;
+        let partes = [
+            vec![punto(0.0, 0.0), punto(0.0, 18.0), punto(13.0, 13.0)],
+            vec![punto(4.6, 14.2), punto(7.6, 21.0), punto(10.6, 19.7), punto(7.7, 13.0)],
+        ];
+        for parte in &partes {
+            let sombra: Vec<Pos2> = parte.iter().map(|q| *q + Vec2::new(1.0, 1.5)).collect();
+            p.add(egui::Shape::convex_polygon(sombra, Color32::from_black_alpha(90), Stroke::new(3.0, Color32::from_black_alpha(90))));
+        }
+        for parte in &partes {
+            p.add(egui::Shape::convex_polygon(parte.clone(), Color32::WHITE, Stroke::new(3.0, Color32::WHITE)));
+        }
+        for parte in &partes {
+            p.add(egui::Shape::convex_polygon(parte.clone(), ACENTO, Stroke::NONE));
         }
     }
 
@@ -634,6 +812,13 @@ impl Zykro {
         let control = self.control();
         if self.revision_app.elapsed() > Duration::from_secs(1) {
             if let Some(app) = android::app_activa() {
+                if self.app_anterior.as_deref() != Some(app.as_str()) {
+                    let completa = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                    if !completa && self.estado.lock().unwrap().config.pantalla_completa.contains(&app) {
+                        ctx.send_viewport_cmd(ViewportCommand::Fullscreen(true));
+                    }
+                    self.app_anterior = Some(app.clone());
+                }
                 self.motor().cambiar_app(&app, control.as_ref(), w, h);
                 // Miniatura de la app al frente para el selector de apps abiertas.
                 if let Some(cuadro) = &self.cuadro {
@@ -648,6 +833,7 @@ impl Zykro {
         let mut motor = self.motor.lock().unwrap();
         motor.fijar_salida(control.clone(), w, h);
         let activo = motor.mapa.is_some()
+            && !self.controles_apagados
             && !escribiendo
             && !self.editor.abierto
             && !self.ajustes.abierto
@@ -812,16 +998,21 @@ impl Zykro {
     fn captura(&self) {
         let Some(c) = self.cuadro.clone() else { return };
         let estado = self.estado.clone();
+        let config = self.config();
         thread::spawn(move || {
             let imagen = c.imagen();
             let (ancho, alto, rgba) = (imagen.size[0] as u32, imagen.size[1] as u32, imagen.as_raw());
-            let carpeta = carpeta_capturas();
+            let carpeta = carpeta_capturas(&config);
             let _ = std::fs::create_dir_all(&carpeta);
             let fecha = Command::new("date").arg("+%Y%m%d-%H%M%S").output();
             let fecha = fecha.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
             let ruta = carpeta.join(format!("captura-{fecha}.png"));
             let ok = guardar_png(&ruta, ancho, alto, &rgba).is_ok();
-            android::avisar(&estado, if ok { "Captura guardada en Imágenes" } else { "No se pudo guardar la captura" });
+            let aviso = match carpeta.file_name() {
+                Some(nombre) if ok => format!("Captura guardada en {}", nombre.to_string_lossy()),
+                _ => "No se pudo guardar la captura".to_string(),
+            };
+            android::avisar(&estado, aviso);
         });
     }
 
@@ -879,7 +1070,7 @@ impl Zykro {
                         if icono(ui, ic::MINUS, "Minimizar", t, FONDO_HOVER).clicked() {
                             ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
                         }
-                        if icono(ui, ic::GEAR, "Configuración", t, FONDO_HOVER).clicked() {
+                        if icono(ui, ic::GEAR, &self.ayuda("Configuración", atajos::Accion::Configuracion), t, FONDO_HOVER).clicked() {
                             self.abrir_ajustes();
                         }
                     });
@@ -900,35 +1091,29 @@ impl Zykro {
                 let t = Vec2::new(ANCHO_LATERAL, 30.0);
                 ui.vertical_centered(|ui| {
                     ui.add_space(4.0);
-                    if icono(ui, ic::CORNERS_OUT, "Pantalla completa (F11)", t, FONDO_HOVER).clicked() {
+                    if icono(ui, ic::CORNERS_OUT, &self.ayuda("Pantalla completa", atajos::Accion::PantallaCompleta), t, FONDO_HOVER).clicked() {
                         alternar_pantalla_completa(ctx);
                     }
                     let boton = icono(ui, ic::KEYBOARD, "Controles del juego", t, FONDO_HOVER);
                     self.boton_controles(&boton);
-                    if icono(ui, ic::SPEAKER_HIGH, "Subir volumen", t, FONDO_HOVER).clicked() {
+                    if icono(ui, ic::SPEAKER_HIGH, &self.ayuda("Subir volumen", atajos::Accion::SubirVolumen), t, FONDO_HOVER).clicked() {
                         self.pulsar(24);
                     }
-                    if icono(ui, ic::SPEAKER_LOW, "Bajar volumen", t, FONDO_HOVER).clicked() {
+                    if icono(ui, ic::SPEAKER_LOW, &self.ayuda("Bajar volumen", atajos::Accion::BajarVolumen), t, FONDO_HOVER).clicked() {
                         self.pulsar(25);
                     }
-                    if icono(ui, ic::CAMERA, "Captura de pantalla", t, FONDO_HOVER).clicked() {
+                    if icono(ui, ic::CAMERA, &self.ayuda("Captura de pantalla", atajos::Accion::Captura), t, FONDO_HOVER).clicked() {
                         self.captura();
                     }
-                    if icono(ui, ic::PACKAGE, "Instalar APK", t, FONDO_HOVER).clicked() {
+                    if icono(ui, ic::PACKAGE, &self.ayuda("Instalar APK", atajos::Accion::InstalarApk), t, FONDO_HOVER).clicked() {
                         android::instalar_apk(self.estado.clone());
                     }
                 });
                 ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
                     ui.add_space(8.0);
                     let t = Vec2::new(ANCHO_LATERAL, 34.0);
-                    if boton_nav(ui, Nav::Recientes, t).clicked() && self.control().is_some() {
-                        // Antes de abrir, la miniatura más nueva de la app que está al frente.
-                        if !self.recientes.abierto() {
-                            if let (Some(app), Some(cuadro)) = (android::app_activa(), &self.cuadro) {
-                                self.recientes.guardar_miniatura(&app, cuadro);
-                            }
-                        }
-                        self.recientes.alternar(ctx);
+                    if boton_nav(ui, Nav::Recientes, t).clicked() {
+                        self.alternar_recientes(ctx);
                     }
                     if boton_nav(ui, Nav::Inicio, t).clicked() {
                         self.panel.cerrar();
@@ -977,6 +1162,7 @@ impl Zykro {
                 Rect::from_center_size(area.center(), Vec2::new(ancho * escala, alto * escala))
             };
 
+            self.rect_imagen = rect;
             if let Some(id) = self.pantalla.id() {
                 let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
                 ui.painter().image(id, rect, uv, Color32::WHITE);
@@ -1059,6 +1245,7 @@ impl Zykro {
             (x as i32, y as i32)
         };
         let (eventos, puntero, mods) = ctx.input(|i| (i.events.clone(), i.pointer.hover_pos(), i.modifiers));
+        let pantalla_completa = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
         let (activo, bloqueado) = (self.mapeo_activo, self.cursor_bloqueado);
         // Con la puntería activa, el hilo de raton.rs ya manda el mouse directo a Android.
         let directo = self.raton_directo.load(Ordering::Relaxed);
@@ -1142,13 +1329,17 @@ impl Zykro {
                     let (x, y) = a_android(pos);
                     self.rueda.mover(&control, (x as f32, y as f32), (d.x, d.y), umbral, ancho, alto);
                 }
-                Event::Key { key, pressed, repeat, modifiers, .. } => {
-                    if key == egui::Key::F11 {
-                        if pressed {
-                            alternar_pantalla_completa(ctx);
-                        }
-                        continue;
+                // Con «Esc sale de la pantalla completa» (Preferencias): suelta la puntería y sale de
+                // la pantalla completa en vez de llegar a Android como Atrás.
+                Event::Key { key: egui::Key::Escape, pressed: true, .. } if self.config().esc_sale && (bloqueado || pantalla_completa) => {
+                    if bloqueado {
+                        self.motor().soltar_punteria(&control, ancho, alto);
                     }
+                    if pantalla_completa {
+                        ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
+                    }
+                }
+                Event::Key { key, pressed, repeat, modifiers, .. } => {
                     if activo {
                         if let Some(nombre) = mapeo::nombre_tecla(key) {
                             if self.motor().tecla(&nombre, pressed, repeat, &control, ancho, alto) {
@@ -1185,6 +1376,14 @@ impl eframe::App for Zykro {
                 m.surrender_focus(id);
             }
         });
+        // Atajos de teclado (no mientras se elige uno nuevo en Configuración): no le llegan a Android.
+        if !self.ajustes.capturando() {
+            let guardadas = self.config().atajos;
+            for accion in ctx.input_mut(|i| atajos::tomar(&mut i.events, &guardadas)) {
+                self.atajo(ctx, accion);
+            }
+        }
+        self.revisar_oculto(ctx);
         if ritmo::iniciar(frame) {
             textura::quitar_vsync();
         }
@@ -1245,6 +1444,15 @@ impl eframe::App for Zykro {
         if emergente || (cambiaron && self.panel.abierto()) {
             self.panel.recargar(ctx);
         }
+        // Con ZYKRO detrás de otra ventana o minimizado, la notificación también sale en el escritorio.
+        if let Some(n) = self.panel.tomar_alerta() {
+            if self.config().notificaciones_escritorio && !ctx.input(|i| i.focused) {
+                notificar_escritorio(n);
+            }
+        }
+        if std::mem::take(&mut self.estado.lock().unwrap().apps_cambiaron) && self.config().accesos_directos {
+            thread::spawn(|| accesos::sincronizar(true));
+        }
         self.ajustes_android.mostrar(ctx, &self.estado);
         let (pedir_fondos, fondo_cambio) = {
             let mut estado = self.estado.lock().unwrap();
@@ -1259,14 +1467,23 @@ impl eframe::App for Zykro {
         if let Some(nueva) = self.ajustes.mostrar(ctx) {
             self.aplicar_config(ctx, nueva);
         }
+        // Restaurar un respaldo: ZYKRO se cierra y la ventana nueva lo restaura antes de encender Android.
+        if let Some(respaldo) = self.ajustes.restaurar.take() {
+            self.restaurar = Some(respaldo);
+            self.reabrir = true;
+            self.cierre_confirmado = true;
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+        }
+        self.cursor_propio(ctx);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.cerrar_menu();
+        gamepad::limpiar_nodos();
         rendimiento::restaurar();
         if self.reabrir {
             // La ventana nueva apaga Android antes de recrearlo.
-            reabrir();
+            reabrir(self.restaurar.as_deref());
         } else {
             android::apagar();
         }
@@ -1339,17 +1556,50 @@ fn decodificar_png(datos: &[u8]) -> (Vec<u8>, u32, u32) {
     (rgba, info.width, info.height)
 }
 
-/// Aplica un modo de rendimiento en segundo plano. `avisar_ok`: avisar también si salió bien.
+/// Aplica un modo de rendimiento (y los núcleos elegidos para Android) en segundo plano.
+/// `avisar_ok`: avisar también si salió bien.
 fn aplicar_modo(estado: &android::EstadoCompartido, modo: rendimiento::Modo, avisar_ok: bool) {
     let estado = estado.clone();
+    let nucleos = estado.lock().unwrap().config.nucleos;
     thread::spawn(move || {
-        let fallos = rendimiento::aplicar(modo);
+        let fallos = rendimiento::aplicar(modo, nucleos);
         if !fallos.is_empty() {
             android::avisar(&estado, format!("{}: {}", modo.nombre(), fallos.join("; ")));
         } else if avisar_ok {
             android::avisar(&estado, format!("Modo {} activado", modo.nombre().to_lowercase()));
         }
     });
+}
+
+/// Toma el candado de «ZYKRO está abierto» (~/.cache/zykro/instancia.lock) y no lo suelta hasta
+/// cerrarse. Con `esperar`, espera a que lo suelte otra ventana; si no, dice si estaba libre.
+fn tomar_instancia(esperar: bool) -> bool {
+    use std::os::fd::AsRawFd;
+    let cache = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".cache"))
+        .join("zykro");
+    let _ = std::fs::create_dir_all(&cache);
+    let Ok(archivo) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(cache.join("instancia.lock")) else {
+        return true;
+    };
+    let modo = if esperar { libc::LOCK_EX } else { libc::LOCK_EX | libc::LOCK_NB };
+    if unsafe { libc::flock(archivo.as_raw_fd(), modo) } != 0 {
+        return false;
+    }
+    std::mem::forget(archivo);
+    true
+}
+
+/// Avisa en el escritorio (con notify-send) de una notificación de Android.
+fn notificar_escritorio(n: panel::Alerta) {
+    let titulo = if n.titulo.is_empty() { n.app.clone() } else { format!("{} · {}", n.app, n.titulo) };
+    let mut orden = Command::new("notify-send");
+    orden.args(["-a", NOMBRE]);
+    if let Some(icono) = n.icono.filter(|i| i.exists()) {
+        orden.arg("-i").arg(icono);
+    }
+    let _ = orden.arg(titulo).arg(n.texto).spawn();
 }
 
 fn alternar_pantalla_completa(ctx: &egui::Context) {
@@ -1407,17 +1657,26 @@ fn registrar_en_archivo() {
 }
 
 /// Abre otra vez ZYKRO para que recree Android con la configuración guardada.
-fn reabrir() {
+fn reabrir(restaurar: Option<&std::path::Path>) {
     use std::os::unix::process::CommandExt;
     // Si ZYKRO se reinstaló mientras corría, el ejecutable viejo figura como «(deleted)».
     let exe = std::env::current_exe().map(|e| PathBuf::from(e.to_string_lossy().trim_end_matches(" (deleted)")));
     let exe = exe.unwrap_or_else(|_| PathBuf::from("zykro"));
-    if let Err(e) = Command::new(&exe).arg(APLICAR_ANDROID).process_group(0).spawn() {
+    let mut orden = Command::new(&exe);
+    match restaurar {
+        Some(respaldo) => orden.arg(RESTAURAR).arg(respaldo),
+        None => orden.arg(APLICAR_ANDROID),
+    };
+    if let Err(e) = orden.process_group(0).spawn() {
         eprintln!("[zykro] no se pudo volver a abrir {}: {e}", exe.display());
     }
 }
 
-fn carpeta_capturas() -> PathBuf {
+/// Dónde se guardan las capturas: la elegida en Preferencias o ~/Imágenes/ZYKRO.
+pub(crate) fn carpeta_capturas(config: &config::Config) -> PathBuf {
+    if let Some(carpeta) = &config.carpeta_capturas {
+        return carpeta.clone();
+    }
     let imagenes = Command::new("xdg-user-dir")
         .arg("PICTURES")
         .output()
@@ -1427,6 +1686,12 @@ fn carpeta_capturas() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Pictures"));
     imagenes.join(NOMBRE)
+}
+
+pub(crate) fn abrir_carpeta_capturas(config: &config::Config) {
+    let carpeta = carpeta_capturas(config);
+    let _ = std::fs::create_dir_all(&carpeta);
+    let _ = Command::new("xdg-open").arg(carpeta).spawn();
 }
 
 fn guardar_png(ruta: &PathBuf, ancho: u32, alto: u32, rgba: &[u8]) -> Result<(), png::EncodingError> {

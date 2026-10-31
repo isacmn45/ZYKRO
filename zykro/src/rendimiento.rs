@@ -64,7 +64,7 @@ impl Modo {
     }
 
     fn nucleos(self) -> usize {
-        let total = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        let total = nucleos_totales();
         match self {
             Modo::Ahorro => (total / 2).max(2),
             _ => total,
@@ -185,6 +185,33 @@ fn detectar_gpu() -> Option<Gpu> {
     Some(Gpu { nombre, fabricante, integrada, tarjeta })
 }
 
+/// Todas las GPU que puede usar Android: su nodo (/dev/dri/renderD…) y su nombre.
+pub fn gpus() -> Vec<(String, String)> {
+    let mut lista: Vec<(String, String)> = std::fs::read_dir("/sys/class/drm")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let nodo = e.file_name().to_str()?.to_string();
+            if !nodo.starts_with("renderD") {
+                return None;
+            }
+            let direccion = std::fs::canonicalize(e.path().join("device")).ok()?.file_name()?.to_str()?.to_string();
+            let nombre = Command::new("lspci")
+                .args(["-mm", "-s", &direccion])
+                .output()
+                .ok()
+                .and_then(|s| String::from_utf8(s.stdout).ok())
+                .and_then(|s| s.split('"').nth(5).map(String::from))
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| direccion.clone());
+            Some((format!("/dev/dri/{nodo}"), nombre))
+        })
+        .collect();
+    lista.sort();
+    lista
+}
+
 fn control_gpu() -> Option<ControlGpu> {
     let g = gpu()?;
     let leer = |p: &Path| std::fs::read_to_string(p).ok().and_then(|s| s.trim().parse::<u32>().ok());
@@ -291,14 +318,21 @@ pub fn aplicar_gpu(modo: Modo) -> bool {
     gpu_permitida() && poner_gpu(Some(modo))
 }
 
-/// Aplica el modo. Devuelve un aviso con lo que no se pudo hacer (vacío si salió todo).
-pub fn aplicar(modo: Modo) -> Vec<&'static str> {
+/// Los núcleos de la CPU de la laptop.
+pub fn nucleos_totales() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
+}
+
+/// Aplica el modo; `nucleos` elige cuántos núcleos usa Android (`None` = los del modo). Devuelve un
+/// aviso con lo que no se pudo hacer (vacío si salió todo).
+pub fn aplicar(modo: Modo, nucleos: Option<usize>) -> Vec<&'static str> {
     PERFIL_ANTERIOR.get_or_init(perfil_actual);
     let mut fallos = Vec::new();
     if !poner_perfil(modo.perfil()) {
         fallos.push("no se pudo cambiar el perfil de energía (¿está power-profiles-daemon?)");
     }
-    if !cpu_android(modo.nucleos(), modo.prioridad()) {
+    let nucleos = nucleos.map_or_else(|| modo.nucleos(), |n| n.clamp(1, nucleos_totales()));
+    if !cpu_android(nucleos, modo.prioridad()) {
         fallos.push("no se pudo ajustar la CPU de Android");
     }
     if control_gpu().is_some() {

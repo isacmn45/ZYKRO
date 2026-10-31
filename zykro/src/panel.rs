@@ -167,6 +167,14 @@ struct Emergente {
     rect: Rect,
 }
 
+/// Una notificación que acaba de avisar, para el escritorio de la laptop.
+pub struct Alerta {
+    pub app: String,
+    pub titulo: String,
+    pub texto: String,
+    pub icono: Option<PathBuf>,
+}
+
 /// Lo que se tocó en una tarjeta (ya se le pidió a la pantalla de inicio).
 enum Toque {
     /// La notificación o uno de sus botones.
@@ -190,6 +198,8 @@ pub struct Panel {
     /// El aviso más nuevo ya visto (ms); al empezar, la hora en que se abrió ZYKRO, para mostrar
     /// solo las notificaciones que lleguen después.
     ultima_alerta: Option<i64>,
+    /// La última que avisó, para que la ventana la mande al escritorio si no está al frente.
+    alerta: Option<Alerta>,
 }
 
 impl Panel {
@@ -473,6 +483,11 @@ impl Panel {
         });
     }
 
+    /// La última notificación que avisó, si no se tomó todavía.
+    pub fn tomar_alerta(&mut self) -> Option<Alerta> {
+        self.alerta.take()
+    }
+
     /// Si encima de `pos` está la notificación emergente (ese toque es para ella, no para Android).
     pub fn sobre_emergente(&self, pos: Pos2) -> bool {
         self.emergente.as_ref().is_some_and(|e| e.visible && e.rect.contains(pos))
@@ -483,6 +498,12 @@ impl Panel {
         let ultima = self.ultima_alerta.unwrap_or(0);
         if let Some(n) = d.notificaciones.iter().filter(|n| n.alerta > ultima).max_by_key(|n| n.alerta) {
             self.ultima_alerta = Some(n.alerta);
+            self.alerta = Some(Alerta {
+                app: n.app.clone(),
+                titulo: n.titulo.clone(),
+                texto: n.texto.clone(),
+                icono: (!n.icono.is_empty()).then(|| carpeta_iconos().join(&n.icono)),
+            });
             if !self.abierto {
                 match &mut self.emergente {
                     // Si ya hay una a la vista, la nueva toma su lugar sin volver a bajar.

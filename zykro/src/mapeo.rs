@@ -699,6 +699,13 @@ impl Motor {
         self.pendientes.push(Pendiente { cuando, accion, dedo, x, y });
     }
 
+    /// Suelta la puntería (el mouse vuelve a ser un cursor), si estaba activa.
+    pub fn soltar_punteria(&mut self, ctl: &Control, w: f32, h: f32) {
+        if self.apuntando {
+            self.alternar_punteria(ctl, w, h);
+        }
+    }
+
     fn alternar_punteria(&mut self, ctl: &Control, w: f32, h: f32) {
         self.apuntando = !self.apuntando;
         if !self.apuntando {
