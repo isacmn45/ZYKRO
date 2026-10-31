@@ -28,6 +28,21 @@
     <dimen name="notification_shelf_height">36dp</dimen>
     <dimen name="notification_panel_margin_bottom">16dp</dimen>
 
+    <!-- Panel de volumen: barra más corta (antes 192 dp; 137 en pantallas como la de ZYKRO, ver
+         values-h411dp), panel más angosto (antes 56 dp) y botones y márgenes más chicos. -->
+    <dimen name="volume_row_slider_height">96dp</dimen>
+    <dimen name="volume_dialog_panel_width">44dp</dimen>
+    <dimen name="volume_dialog_ringer_size">34dp</dimen>
+    <dimen name="volume_dialog_tap_target_size">34dp</dimen>
+    <dimen name="volume_ringer_drawer_item_size">34dp</dimen>
+    <dimen name="volume_ringer_drawer_item_size_half">17dp</dimen>
+    <dimen name="volume_ringer_drawer_icon_size">20dp</dimen>
+    <dimen name="volume_dialog_caption_size">40dp</dimen>
+    <dimen name="volume_dialog_stream_padding">8dp</dimen>
+    <dimen name="volume_dialog_ringer_icon_padding">14dp</dimen>
+    <dimen name="volume_dialog_ringer_rows_padding">5dp</dimen>
+    <dimen name="volume_dialog_row_margin_bottom">6dp</dimen>
+
     <!-- Hora y fecha del encabezado (antes 14 sp). -->
     <style name="TextAppearance.QS.Status" parent="@android:style/TextAppearance.DeviceDefault">
         <item name="android:textSize">13sp</item>

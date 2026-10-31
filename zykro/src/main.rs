@@ -49,6 +49,9 @@ const ANCHO_LATERAL: f32 = 34.0;
 /// Refrescos seguidos con un cuadro de retraso antes de saltar uno (medio segundo a 60 Hz).
 const MAX_ATRASADOS: u32 = 30;
 const BORDE: f32 = 5.0; // zona en la orilla para cambiar el tamaño
+/// Franja de arriba de la imagen desde la que se baja el centro de control, y cuánto hay que bajar.
+const BORDE_BARRA: f32 = 10.0;
+const BAJADA_BARRA: f32 = 40.0;
 const TAMANO_MINIMO: Vec2 = Vec2::new(480.0, 300.0);
 /// Tras cambiar el tamaño de la ventana, cuánto tiene que quedarse quieto antes de ajustarlo.
 const QUIETO: Duration = Duration::from_millis(200);
@@ -204,6 +207,9 @@ struct Zykro {
     atrasados: u32,
     lateral: bool,
     tocando: Option<Pos2>,
+    /// Se presionó en el borde de arriba de la imagen: puede ser el gesto de bajar el centro de
+    /// control (ver `entrada`).
+    desde_borde: Option<Pos2>,
     /// Scroll con la rueda o el touchpad, imitado arrastrando un dedo.
     rueda: rueda::Rueda,
     fps: u32,
@@ -315,6 +321,7 @@ impl Zykro {
             atrasados: 0,
             lateral: true,
             tocando: None,
+            desde_borde: None,
             rueda: rueda::Rueda::default(),
             fps: 0,
             cuadros_seg: 0,
@@ -1050,6 +1057,25 @@ impl Zykro {
                 Event::PointerButton { pos, button, pressed, .. } if activo && (bloqueado || button != PointerButton::Primary) => {
                     if !(bloqueado && directo) && (bloqueado || !pressed || rect.contains(pos)) {
                         self.motor().boton(button, pressed, &control, ancho, alto);
+                    }
+                }
+                // El Android de ZYKRO no tiene barra de estado (mide 0, como en BlueStacks), así que el
+                // gesto de bajar el centro de control no tiene de dónde salir: lo hace ZYKRO. Si el toque
+                // empieza en el borde de arriba y baja, se abre; si no baja, se manda como un toque.
+                Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, .. }
+                    if rect.contains(pos) && pos.y - rect.min.y <= BORDE_BARRA =>
+                {
+                    self.desde_borde = Some(pos);
+                }
+                Event::PointerMoved(pos) if self.desde_borde.is_some_and(|inicio| pos.y - inicio.y > BAJADA_BARRA) => {
+                    self.desde_borde = None;
+                    thread::spawn(|| android::shell("cmd statusbar expand-notifications"));
+                }
+                Event::PointerButton { button: PointerButton::Primary, pressed: false, .. } if self.desde_borde.is_some() => {
+                    if let Some(inicio) = self.desde_borde.take() {
+                        let (x, y) = a_android(inicio);
+                        control.toque(BAJAR, 0, x, y, w, h);
+                        control.toque(SOLTAR, 0, x, y, w, h);
                     }
                 }
                 Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, .. } if rect.contains(pos) => {

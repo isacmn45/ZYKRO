@@ -21,10 +21,13 @@ fi
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+# Sin deduplicar: aapt2 quita una variante (por ejemplo, horizontal) si vale lo mismo que la general,
+# pero aquí hace falta para tapar la variante propia de la app.
 for nombre in configuracion sistema; do
     "$HERRAMIENTAS/aapt2" compile --dir "$nombre/res" -o "$TMP/$nombre.zip"
     "$HERRAMIENTAS/aapt2" link -o "$TMP/$nombre-base.apk" -I "$ANDROID_JAR" --manifest "$nombre/AndroidManifest.xml" \
-        --min-sdk-version 30 --target-sdk-version 33 --version-code 1 --version-name 1.0 "$TMP/$nombre.zip"
+        --min-sdk-version 30 --target-sdk-version 33 --version-code 1 --version-name 1.0 --no-resource-deduping \
+        "$TMP/$nombre.zip"
     "$HERRAMIENTAS/zipalign" -f 4 "$TMP/$nombre-base.apk" "$TMP/$nombre-alineado.apk"
     "$HERRAMIENTAS/apksigner" -J-enable-native-access=ALL-UNNAMED sign --ks firma.keystore \
         --ks-pass pass:zykro-ajustes --key-pass pass:zykro-ajustes --out "$nombre.apk" "$TMP/$nombre-alineado.apk"

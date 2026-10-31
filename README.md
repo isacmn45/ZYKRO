@@ -24,9 +24,10 @@ como la de BlueStacks.
   una carpeta con las del sistema. Su engrane abre unos **ajustes de Android compactos** dentro de
   ZYKRO: apps (abrir, detener, borrar caché o datos, desinstalar), idioma, letra, animaciones y
   almacenamiento.
-- **Interfaz de Android compacta:** la app de Configuración, el centro de control y el panel de
-  notificaciones vienen con letra, filas, botones y encabezados más chicos, para que quepan en una
-  ventana de laptop.
+- **Interfaz de Android compacta:** la app de Configuración, el centro de control, el panel de
+  notificaciones y el de volumen vienen con letra, filas, botones y encabezados más chicos, para que
+  quepan en una ventana de laptop. Como en BlueStacks, Android no muestra barra de estado: el centro
+  de control se baja arrastrando desde el borde de arriba de la imagen.
 - **Extras:** selector de apps abiertas, capturas de pantalla, scroll con la rueda o el touchpad y
   temperatura de la CPU y la GPU en la barra de título.
 
