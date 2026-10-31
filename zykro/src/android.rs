@@ -241,6 +241,7 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
     }
     poner_zona_horaria();
     asegurar_inicio();
+    quitar_sobrantes();
 
     let ctx2 = ctx.clone();
     video::recibir_cuadros(socket_video, destino.clone(), move || {
@@ -271,6 +272,81 @@ fn poner_zona_horaria() {
     };
     thread::spawn(move || {
         docker(&["exec", CONTENEDOR, "cmd", "alarm", "set-timezone", &zona]);
+    });
+}
+
+/// Apps de Android que no sirven en un emulador. Se desinstalan solo para el usuario: siguen en la
+/// imagen y `cmd package install-existing <paquete>` devuelve cualquiera. Lo que tiene un teléfono de
+/// verdad (llamadas, Bluetooth, Wi-Fi, ubicación, cámara) se queda: los juegos lo revisan para saber
+/// si corren en un emulador.
+const SOBRANTES: &[&str] = &[
+    // Protectores de pantalla, fondos animados y el huevo de pascua.
+    "com.android.dreams.basic",
+    "com.android.dreams.phototable",
+    "com.android.egg",
+    "com.android.wallpaper.livepicker",
+    "com.android.wallpapercropper",
+    "com.android.wallpaperbackup",
+    // Impresión.
+    "com.android.bips",
+    "com.android.printservice.recommendation",
+    "com.android.printspooler",
+    // Copias de seguridad.
+    "com.android.localtransport",
+    "com.android.backupconfirm",
+    "com.android.sharedstoragebackup",
+    // Perfiles de empresa, instalar otro sistema, tareas del primer arranque y de pruebas.
+    "com.android.managedprovisioning",
+    "com.android.dynsystem",
+    "com.android.onetimeinitializer",
+    "com.android.cts.ctsshim",
+    "com.android.cts.priv.ctsshim",
+    "com.android.traceur",
+    // Hardware que no hay: NFC, chip seguro, USB, relojes, MIDI por Bluetooth, efectos de cámara.
+    "com.android.nfc",
+    "com.android.se",
+    "com.android.mtp",
+    "com.android.companiondevicemanager",
+    "com.android.bluetoothmidiservice",
+    "com.android.cameraextensions",
+    // Mensajes MMS y de la SIM (el teléfono en sí se queda).
+    "com.android.mms.service",
+    "com.android.smspush",
+    "com.android.simappdialog",
+    // Inicio de sesión de redes Wi-Fi públicas (la red sale de Docker).
+    "com.android.captiveportallogin",
+    "com.android.hotspot2.osulogin",
+    // Calendario, sincronizar contactos con Google, ecualizador, verificar enlaces, marcadores y el
+    // visor de licencias.
+    "com.android.providers.calendar",
+    "com.google.android.syncadapters.calendar",
+    "com.google.android.syncadapters.contacts",
+    "com.android.musicfx",
+    "com.android.statementservice",
+    "com.android.bookmarkprovider",
+    "com.android.htmlviewer",
+    // Lo que Google Play instala solo: SafetyCore (revisa las imágenes de los mensajes), los
+    // verificadores de contactos y de desarrolladores (este revisa las apps instaladas por fuera de la
+    // tienda, como la pantalla de inicio de ZYKRO) y realidad aumentada. Si Play las reinstala, se
+    // vuelven a quitar al abrir ZYKRO.
+    "com.google.android.safetycore",
+    "com.google.android.contactkeys",
+    "com.google.android.verifier",
+    "com.google.ar.core",
+];
+
+/// Quita de Android las apps de `SOBRANTES` que sigan instaladas.
+fn quitar_sobrantes() {
+    thread::spawn(|| {
+        let lista = SOBRANTES.join(" ");
+        let salida = shell(&format!(
+            "instaladas=$(pm list packages --user 0); for p in {lista}; do \
+             echo \"$instaladas\" | grep -qx \"package:$p\" && pm uninstall --user 0 $p >/dev/null && echo $p; done; true"
+        ));
+        let quitadas: Vec<&str> = salida.as_deref().unwrap_or("").lines().collect();
+        if !quitadas.is_empty() {
+            eprintln!("[android] apps que sobraban quitadas: {}", quitadas.join(", "));
+        }
     });
 }
 
