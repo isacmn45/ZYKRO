@@ -456,16 +456,16 @@ fn permisos_inicio() {
 
 /// Usa teclado-android (`bin/` de este repositorio) para que Android no muestre su teclado en pantalla.
 fn ocultar_teclado_en_pantalla() {
-    if let Some(home) = std::env::var_os("HOME") {
-        let script = PathBuf::from(home).join(".local/bin/teclado-android");
-        if script.exists() {
-            let _ = Command::new(script).arg("ocultar").stdout(Stdio::null()).stderr(Stdio::null()).spawn();
-        }
-    }
     // Con el teclado falso, Android avisa «Configura el teclado físico» (no tiene distribución
     // elegida). No hay orden para bloquear ese canal, pero sí para posponer el aviso: un año. Si
     // vuelve a salir mientras está pospuesto, sigue oculto.
     thread::spawn(|| {
+        if let Some(home) = std::env::var_os("HOME") {
+            let script = PathBuf::from(home).join(".local/bin/teclado-android");
+            if script.exists() {
+                let _ = Command::new(script).arg("ocultar").stdout(Stdio::null()).stderr(Stdio::null()).status();
+            }
+        }
         const AVISO: &str = "-1|android|19|null|1000";
         for _ in 0..20 {
             thread::sleep(Duration::from_secs(1));

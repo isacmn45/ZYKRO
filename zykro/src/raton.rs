@@ -45,7 +45,6 @@ pub fn iniciar(motor: Arc<Mutex<Motor>>, activo: Arc<AtomicBool>, listo: Arc<Ato
             let mut botones: Vec<Vec<(PointerButton, bool)>> = vec![Vec::new(); ratones.len()];
             let mut buf = [0u8; TAM_EVENTO * 64];
             while Instant::now() < revisar {
-                let apuntando = activo.load(Ordering::Relaxed);
                 let listos: Vec<bool> = {
                     let mut fds: Vec<PollFd> = ratones.iter().map(|f| PollFd::new(f.as_fd(), PollFlags::POLLIN)).collect();
                     if poll(&mut fds, PollTimeout::from(200u8)).is_err() {
@@ -74,7 +73,7 @@ pub fn iniciar(motor: Arc<Mutex<Motor>>, activo: Arc<AtomicBool>, listo: Arc<Ato
                             (EV_SYN, _) => {
                                 let delta = std::mem::take(&mut pendiente[i]);
                                 let clics = std::mem::take(&mut botones[i]);
-                                if apuntando && (delta != Vec2::ZERO || !clics.is_empty()) {
+                                if activo.load(Ordering::Relaxed) && (delta != Vec2::ZERO || !clics.is_empty()) {
                                     let mut m = motor.lock().unwrap();
                                     if delta != Vec2::ZERO {
                                         m.mover_directo(delta);

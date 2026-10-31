@@ -1511,7 +1511,7 @@ impl Motor {
                 return;
             }
         }
-        let Some(r) = self.mapa.as_ref().and_then(|m| m.raton.clone()) else { return };
+        let Some(r) = self.mapa.as_ref().and_then(|m| m.raton.as_ref()) else { return };
         if !self.cursor_bloqueado() {
             return;
         }
@@ -1548,6 +1548,9 @@ impl Motor {
         let ahora = Instant::now();
         let dt = (ahora - self.ultimo_tick).as_secs_f32().min(0.05);
         self.ultimo_tick = ahora;
+        if !self.ocupado() {
+            return;
+        }
         let (listos, faltan): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pendientes).into_iter().partition(|p| p.cuando <= ahora);
         self.pendientes = faltan;
         for p in listos {
@@ -2214,6 +2217,42 @@ mod pruebas {
 
     const W: f32 = 1280.0;
     const H: f32 = 720.0;
+
+    #[test]
+    fn tick_inactivo_actualiza_reloj_y_respeta_toques_pendientes() {
+        let eventos = toques(Mapa::default(), |motor, ctl| {
+            motor.ultimo_tick = Instant::now() - Duration::from_secs(1);
+            let antes = Instant::now();
+            motor.tick(ctl, W, H);
+            assert!(motor.ultimo_tick >= antes);
+            assert!(!motor.ocupado());
+            motor.programar(Instant::now(), BAJAR, 0, 12, 34);
+            motor.tick(ctl, W, H);
+        });
+        assert_eq!(eventos, vec![(BAJAR, 12, 34)]);
+    }
+
+    #[test]
+    #[ignore]
+    fn medir_rutas_de_entrada() {
+        let mapa = Mapa::desde_json(serde_json::from_str(include_str!("../../config/keymap/com.dts.freefireth.json")).unwrap()).unwrap();
+        for _ in 0..5 {
+            let eventos = toques(mapa.clone(), |motor, ctl| {
+                let inicio = Instant::now();
+                for _ in 0..100_000 {
+                    motor.tick(std::hint::black_box(ctl), W, H);
+                }
+                eprintln!("[medicion] 100000 ticks inactivos: {:?}", inicio.elapsed());
+                motor.apuntando = true;
+                let inicio = Instant::now();
+                for _ in 0..100_000 {
+                    motor.mover(std::hint::black_box(Vec2::new(1.0, -1.0)), ctl, W, H);
+                }
+                eprintln!("[medicion] 100000 movimientos: {:?}", inicio.elapsed());
+            });
+            assert_eq!(eventos.len(), 100_001);
+        }
+    }
 
     #[test]
     fn toques_repetidos() {
