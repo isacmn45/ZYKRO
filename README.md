@@ -29,9 +29,14 @@ como la de BlueStacks.
   quepan en una ventana de laptop.
 - **Panel de notificaciones propio**, compacto como el de Android 4 y con el tema de ZYKRO: se baja
   arrastrando desde el borde de arriba de la imagen (Android no muestra barra de estado, como en
-  BlueStacks) y la cubre entera. Interruptores (avión, no molestar, girar, captura, ajustes), volumen y
-  las notificaciones en tarjetas, que se abren, se quitan o se borran todas. El panel moderno de
-  Android sigue a un toque, para la música o responder mensajes.
+  BlueStacks), la cubre entera y se sube arrastrándolo hacia arriba (o con Atrás o Esc).
+  Interruptores (avión, no molestar, girar, captura, ajustes), volumen y las notificaciones en
+  tarjetas, que se abren, se quitan o se borran todas. El panel moderno de Android sigue a un toque,
+  para la música o responder mensajes.
+- **Notificaciones emergentes con el tema de ZYKRO:** las que suenan aparecen arriba de la imagen
+  unos segundos; se abren con un toque, se quitan con la X o se despachan arrastrándolas hacia
+  arriba. Respetan «No molestar», y con la puntería activa solo se ven, sin quitarle el mouse al
+  juego.
 - **Extras:** selector de apps abiertas, capturas de pantalla, scroll con la rueda o el touchpad y
   temperatura de la CPU y la GPU en la barra de título.
 

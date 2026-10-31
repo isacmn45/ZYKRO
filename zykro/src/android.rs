@@ -49,6 +49,8 @@ pub struct Estado {
     pub pedir_ajustes: bool,
     /// Cambiaron las notificaciones (las exporta la pantalla de inicio de ZYKRO).
     pub notificaciones_cambiaron: bool,
+    /// Entre los cambios hay una notificación que avisa: ZYKRO la muestra como emergente.
+    pub notificacion_emergente: bool,
 }
 
 pub type EstadoCompartido = Arc<Mutex<Estado>>;
@@ -324,10 +326,12 @@ fn asegurar_inicio() {
 }
 
 /// La pantalla de inicio escucha las notificaciones para el panel de ZYKRO, y las abre aunque esté
-/// detrás de otra app (el permiso de mostrarse encima la exime de esa restricción de Android).
+/// detrás de otra app (el permiso de mostrarse encima la exime de esa restricción de Android). Las
+/// emergentes de Android se apagan: las muestra ZYKRO, con su tema.
 fn permisos_inicio() {
     shell(&format!(
-        "cmd notification allow_listener {INICIO}/{INICIO}.Escucha; appops set {INICIO} SYSTEM_ALERT_WINDOW allow"
+        "cmd notification allow_listener {INICIO}/{INICIO}.Escucha; appops set {INICIO} SYSTEM_ALERT_WINDOW allow; \
+         settings put global heads_up_notifications_enabled 0"
     ));
 }
 
@@ -373,6 +377,11 @@ pub fn vigilar_peticiones(ctx: egui::Context, estado: EstadoCompartido) {
                     match linea.trim() {
                         "ajustes" => estado.lock().unwrap().pedir_ajustes = true,
                         "notificaciones" => estado.lock().unwrap().notificaciones_cambiaron = true,
+                        "emergente" => {
+                            let mut estado = estado.lock().unwrap();
+                            estado.notificaciones_cambiaron = true;
+                            estado.notificacion_emergente = true;
+                        }
                         _ => continue,
                     }
                     ctx.request_repaint();

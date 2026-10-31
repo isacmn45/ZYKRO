@@ -934,10 +934,16 @@ impl Zykro {
                         self.recientes.alternar(ctx);
                     }
                     if boton_nav(ui, Nav::Inicio, t).clicked() {
+                        self.panel.cerrar();
                         self.pulsar(3);
                     }
                     if boton_nav(ui, Nav::Atras, t).clicked() {
-                        self.pulsar(4);
+                        // Como en Android: con el panel de notificaciones abierto, Atrás lo cierra.
+                        if self.panel.abierto() {
+                            self.panel.cerrar();
+                        } else {
+                            self.pulsar(4);
+                        }
                     }
                 });
             });
@@ -1027,6 +1033,8 @@ impl Zykro {
                 }
                 None => {}
             }
+            // Con la puntería activa el mouse es del juego: la notificación solo se ve.
+            self.panel.mostrar_emergente(ctx, area, !self.cursor_bloqueado);
             // Fuera de `entrada` también: que el dedo del scroll nunca se quede abajo.
             if let Some(c) = self.control() {
                 if let Some(falta) = self.rueda.revisar(&c, ancho, alto) {
@@ -1072,6 +1080,9 @@ impl Zykro {
                         self.motor().boton(button, pressed, &control, ancho, alto);
                     }
                 }
+                // Un toque sobre la notificación emergente es para ella (panel.rs), no para Android.
+                Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, .. }
+                    if !bloqueado && self.panel.sobre_emergente(pos) => {}
                 // El Android de ZYKRO no tiene barra de estado (mide 0, como en BlueStacks), así que el
                 // gesto de bajar las notificaciones no tiene de dónde salir: lo hace ZYKRO, con su propio
                 // panel (panel.rs). Si el toque empieza en el borde de arriba y baja, se abre; si no
@@ -1083,7 +1094,7 @@ impl Zykro {
                 }
                 Event::PointerMoved(pos) if self.desde_borde.is_some_and(|inicio| pos.y - inicio.y > BAJADA_BARRA) => {
                     self.desde_borde = None;
-                    self.panel.abrir(ctx);
+                    self.panel.abrir_arrastrando(ctx);
                 }
                 Event::PointerButton { button: PointerButton::Primary, pressed: false, .. } if self.desde_borde.is_some() => {
                     if let Some(inicio) = self.desde_borde.take() {
@@ -1114,7 +1125,7 @@ impl Zykro {
                     }
                 }
                 Event::MouseWheel { unit, delta, .. } if !bloqueado && self.tocando.is_none() => {
-                    let Some(pos) = puntero.filter(|p| rect.contains(*p)) else { continue };
+                    let Some(pos) = puntero.filter(|p| rect.contains(*p) && !self.panel.sobre_emergente(*p)) else { continue };
                     // El dedo se mueve hacia donde va el contenido: rueda hacia abajo = dedo hacia arriba.
                     let d = match unit {
                         MouseWheelUnit::Point => delta * (ancho / rect.width()),
@@ -1223,7 +1234,13 @@ impl eframe::App for Zykro {
         if std::mem::take(&mut self.estado.lock().unwrap().pedir_ajustes) {
             self.ajustes_android.abrir(ctx);
         }
-        if std::mem::take(&mut self.estado.lock().unwrap().notificaciones_cambiaron) && self.panel.abierto() {
+        // Con el panel cerrado solo hace falta leerlas si una avisa (para la emergente): así una
+        // descarga que actualiza su progreso no tiene a ZYKRO leyendo todo el tiempo.
+        let (cambiaron, emergente) = {
+            let mut estado = self.estado.lock().unwrap();
+            (std::mem::take(&mut estado.notificaciones_cambiaron), std::mem::take(&mut estado.notificacion_emergente))
+        };
+        if emergente || (cambiaron && self.panel.abierto()) {
             self.panel.recargar(ctx);
         }
         self.ajustes_android.mostrar(ctx, &self.estado);

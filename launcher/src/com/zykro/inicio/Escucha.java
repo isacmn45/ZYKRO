@@ -1,6 +1,7 @@
 package com.zykro.inicio;
 
 import android.app.Notification;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -14,6 +15,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.json.JSONArray;
@@ -23,18 +26,23 @@ import org.json.JSONObject;
 /**
  * Escucha las notificaciones para el panel de ZYKRO (al estilo de Android 4, lo dibuja ZYKRO): deja
  * cada una, con su ícono, en la carpeta de esta app y avisa por el registro. ZYKRO le da el permiso
- * con `cmd notification allow_listener` y le pide abrirlas o quitarlas con {@link Acciones}.
+ * con `cmd notification allow_listener` y le pide abrirlas o quitarlas con {@link Acciones}. También
+ * marca cuándo avisó cada una, para que ZYKRO la muestre como emergente (las de Android están apagadas).
  */
 public class Escucha extends NotificationListenerService {
     /** La que está conectada, para {@link Acciones}. */
     static volatile Escucha activa;
 
     private final ExecutorService fondo = Executors.newSingleThreadExecutor();
+    /** Cuándo avisó cada notificación por última vez (ms), por clave. */
+    private final Map<String, Long> alertas = new ConcurrentHashMap<>();
+    /** El título y el texto con que se vio cada una, para saber si una actualización cambió algo. */
+    private final Map<String, String> textos = new ConcurrentHashMap<>();
 
     @Override
     public void onListenerConnected() {
         activa = this;
-        exportar();
+        exportar(false);
     }
 
     @Override
@@ -45,13 +53,42 @@ public class Escucha extends NotificationListenerService {
     }
 
     @Override
-    public void onNotificationPosted(StatusBarNotification sbn) {
-        exportar();
+    public void onNotificationPosted(StatusBarNotification sbn, RankingMap ranking) {
+        boolean aviso = avisa(sbn, ranking);
+        if (aviso) {
+            alertas.put(sbn.getKey(), System.currentTimeMillis());
+        }
+        exportar(aviso);
     }
 
     @Override
     public void onNotificationRemoved(StatusBarNotification sbn) {
-        exportar();
+        alertas.remove(sbn.getKey());
+        textos.remove(sbn.getKey());
+        exportar(false);
+    }
+
+    /**
+     * Si Android avisaría de esta notificación (suena o vibra): canal de importancia normal o más,
+     * que «No molestar» no la silencie y, si es una actualización, que cambie el texto y la app no
+     * haya pedido avisar una sola vez.
+     */
+    private boolean avisa(StatusBarNotification sbn, RankingMap ranking) {
+        Notification n = sbn.getNotification();
+        String texto = n.extras.getCharSequence(Notification.EXTRA_TITLE) + "\n" + n.extras.getCharSequence(Notification.EXTRA_TEXT);
+        String antes = textos.put(sbn.getKey(), texto);
+        if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) {
+            return false;
+        }
+        Ranking r = new Ranking();
+        if (ranking == null || !ranking.getRanking(sbn.getKey(), r)) {
+            return false;
+        }
+        if (r.getImportance() < NotificationManager.IMPORTANCE_DEFAULT || !r.matchesInterruptionFilter()
+                || (r.getSuppressedVisualEffects() & NotificationManager.Policy.SUPPRESSED_EFFECT_PEEK) != 0) {
+            return false;
+        }
+        return antes == null || ((n.flags & Notification.FLAG_ONLY_ALERT_ONCE) == 0 && !texto.equals(antes));
     }
 
     @Override
@@ -60,7 +97,8 @@ public class Escucha extends NotificationListenerService {
         super.onDestroy();
     }
 
-    private void exportar() {
+    /** Con `aviso`, también le dice a ZYKRO que hay una notificación para mostrar como emergente. */
+    private void exportar(boolean aviso) {
         StatusBarNotification[] todas;
         try {
             todas = getActiveNotifications();
@@ -68,12 +106,12 @@ public class Escucha extends NotificationListenerService {
             return;
         }
         if (todas != null) {
-            fondo.execute(() -> escribir(todas));
+            fondo.execute(() -> escribir(todas, aviso));
         }
     }
 
     /** notificaciones.json y un PNG por notificación en notificaciones/ (se rehace cada vez). */
-    private void escribir(StatusBarNotification[] todas) {
+    private void escribir(StatusBarNotification[] todas, boolean aviso) {
         File carpeta = getExternalFilesDir(null);
         if (carpeta == null) {
             return;
@@ -124,6 +162,8 @@ public class Escucha extends NotificationListenerService {
                     imagen.compress(Bitmap.CompressFormat.PNG, 100, salida);
                 }
                 o.put("icono", archivo);
+                Long alerta = alertas.get(sbn.getKey());
+                o.put("alerta", alerta == null ? 0 : alerta);
                 lista.put(o);
             }
             File temporal = new File(carpeta, "notificaciones.json.tmp");
@@ -131,7 +171,7 @@ public class Escucha extends NotificationListenerService {
                 salida.write(lista.toString().getBytes(StandardCharsets.UTF_8));
             }
             temporal.renameTo(new File(carpeta, "notificaciones.json"));
-            Log.i("ZYKRO", "notificaciones");
+            Log.i("ZYKRO", aviso ? "emergente" : "notificaciones");
         } catch (IOException | JSONException e) {
             Log.w("ZYKRO", "no se pudieron guardar las notificaciones", e);
         }

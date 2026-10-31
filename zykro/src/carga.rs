@@ -12,7 +12,7 @@ const ERROR: Color32 = Color32::from_rgb(0xff, 0x8a, 0x80);
 
 /// Se muestran de a uno, cada `CADA_CONSEJO` segundos.
 const CONSEJOS: [&str; 7] = [
-    "Arrastra hacia abajo desde el borde de arriba para ver las notificaciones.",
+    "Arrastra hacia abajo desde el borde de arriba para ver las notificaciones, y hacia arriba para cerrarlas.",
     "Presiona ` para activar o suspender la puntería.",
     "F11 pone ZYKRO en pantalla completa.",
     "El botón del control, arriba, abre el menú de controles del juego.",
