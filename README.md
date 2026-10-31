@@ -58,7 +58,10 @@ como la de BlueStacks.
   fondos animados, impresión, copias de seguridad, perfiles de empresa, NFC, MMS, calendario y lo que
   Google Play instala solo, como SafetyCore). Así corren unos 160 MB menos en segundo plano. Llamadas,
   Bluetooth, Wi-Fi, ubicación y cámara se quedan: los juegos los revisan para saber si corren en un
-  emulador. La lista está en `SOBRANTES` (`zykro/src/android.rs`); para devolver una app, sácala de
+  emulador. Cuando la imagen declara Bluetooth deshabilitado, ZYKRO mantiene apagados el adaptador
+  y la búsqueda BLE de Android para evitar que el servicio falle al arrancar sin su interfaz HCI;
+  el Bluetooth de Linux y los mandos conectados a la laptop siguen funcionando.
+  La lista está en `SOBRANTES` (`zykro/src/android.rs`); para devolver una app, sácala de
   ahí y corre `docker exec redroid-redroid-1 cmd package install-existing <paquete>`.
 - **Panel de notificaciones propio**, compacto como el de Android 4 y con el tema de ZYKRO: se baja
   arrastrando desde el borde de arriba de la imagen (Android no muestra barra de estado, como en

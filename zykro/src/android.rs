@@ -634,6 +634,10 @@ pub static ABRIR_AL_INICIAR: Mutex<Option<String>> = Mutex::new(None);
 
 /// Lo de Configuración que se aplica en Android sin reiniciarlo: la operadora, el sonido al tocar y
 /// ADB (Android lo olvida al reiniciarse, así que se aplica cada vez que arranca).
+const BLUETOOTH_SIN_HAL: &str = "if [ \"$(getprop persist.bluetooth.disabled)\" = true ] || \
+    [ \"$(getprop bluetooth.service.enabled)\" = false ]; then \
+    settings put global ble_scan_always_enabled 0; svc bluetooth disable; fi";
+
 pub fn aplicar_preferencias(config: &config::Config) {
     let mut adb = if config.adb { "setprop service.adb.tcp.port 5555; setprop ctl.start adbd".to_string() } else { "setprop ctl.stop adbd".into() };
     // La llave de `adb` de la laptop queda autorizada: sin esto, Android pide aceptarla (como un
@@ -650,7 +654,7 @@ pub fn aplicar_preferencias(config: &config::Config) {
         );
     }
     let orden = format!(
-        "{}; settings put system sound_effects_enabled {}; {adb}",
+        "{BLUETOOTH_SIN_HAL}; {}; settings put system sound_effects_enabled {}; {adb}",
         crate::telefono::orden_operadora(config.operadora.as_deref()),
         config.sonido_toques as u8
     );
@@ -783,6 +787,26 @@ fn comando_run(info: &serde_json::Value, nueva: &config::Android) -> Result<Vec<
 
 #[cfg(test)]
 mod pruebas {
+    #[test]
+    fn solo_apaga_bluetooth_cuando_la_imagen_lo_declara_inhabilitado() {
+        let orden = format!(
+            "getprop() {{ case \"$1\" in persist.bluetooth.disabled) printf '%s' \"$PRUEBA_DESHABILITADO\";; \
+             bluetooth.service.enabled) printf '%s' \"$PRUEBA_SERVICIO\";; esac; }}; \
+             settings() {{ printf 'settings %s\\n' \"$*\"; }}; svc() {{ printf 'svc %s\\n' \"$*\"; }}; {}",
+            super::BLUETOOTH_SIN_HAL
+        );
+        for (deshabilitado, servicio, apagar) in [("true", "", true), ("", "false", true), ("false", "true", false), ("", "", false)] {
+            let salida = std::process::Command::new("/bin/sh")
+                .args(["-c", &orden])
+                .env("PRUEBA_DESHABILITADO", deshabilitado)
+                .env("PRUEBA_SERVICIO", servicio)
+                .output().unwrap();
+            assert!(salida.status.success());
+            let esperado = if apagar { "settings put global ble_scan_always_enabled 0\nsvc bluetooth disable\n" } else { "" };
+            assert_eq!(String::from_utf8(salida.stdout).unwrap(), esperado);
+        }
+    }
+
     /// Lista las apps abiertas del Android que está corriendo:
     /// `cargo test tareas_reales -- --ignored --nocapture`
     #[test]
