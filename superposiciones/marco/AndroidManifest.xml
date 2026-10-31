@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Superposición (RRO) del marco de Android: sin barra de estado ni barra de navegación. La hora,
+     las notificaciones y los botones los pone ZYKRO en su ventana. Va en /vendor/overlay de la imagen
+     de Android (ver imagen/Dockerfile). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.zykro.superposicion.marco">
+    <overlay
+        android:isStatic="true"
+        android:priority="50"
+        android:targetPackage="android" />
+    <application
+        android:hasCode="false"
+        android:label="Marco de ZYKRO" />
+</manifest>

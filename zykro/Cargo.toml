@@ -2,7 +2,7 @@
 name = "zykro"
 version = "0.1.0"
 edition = "2021"
-description = "ZYKRO: emulador propio sobre el Android de SwagPlayer (redroid + swag-rust-server)"
+description = "ZYKRO: emulador de Android sobre redroid, con servidor propio de pantalla, toques y sonido"
 license = "MIT"
 repository = "https://github.com/isacmn45/ZYKRO"
 

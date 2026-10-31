@@ -1,13 +1,14 @@
-//! Sonido de Android. swag-rust-server lo pone en un anillo de memoria compartida («ASHM»):
+//! Sonido de Android. El servidor de ZYKRO lo pone en un anillo de memoria compartida («ASHM»):
 //!
-//! - `audio.sock` manda un byte 0xFC con el fd de un memfd (`swag-audio-ring`) y luego 20 bytes en
+//! - `audio.sock` manda un byte 0xFC con el fd del anillo (un memfd) y luego 20 bytes en
 //!   big-endian: «ASHM», frecuencia, canales, bytes por cuadro y tamaño del anillo.
 //! - En el memfd, la cabecera (little-endian, 1024 bytes) tiene los mismos datos y, en 0x1c, un
 //!   contador que sube de 2 en 2 por bloque (impar mientras escribe). En 0x40 hay 32 entradas de
 //!   16 bytes {contador, desplazamiento, largo, 0}: la del bloque `n` está en 0x40 + (n & 0x3e) * 8.
 //! - Los datos (PCM s16 intercalado) empiezan en 0x400 y dan la vuelta al llegar al final.
 //!
-//! Se reproduce con un flujo de PulseAudio (pipewire-pulse). Detalles en docs/investigacion.md.
+//! Se reproduce con un flujo de PulseAudio (pipewire-pulse). Detalles en
+//! servidor/src/com/zykro/servidor/Audio.java.
 
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -29,9 +30,7 @@ use memmap2::{Mmap, MmapOptions};
 use nix::errno::Errno;
 use nix::sys::socket::{connect, recvmsg, socket, AddressFamily, ControlMessageOwned, MsgFlags, SockFlag, SockType, UnixAddr};
 
-use crate::android::CONTENEDOR;
-
-const SOCKET: &str = "/tmp/swag_sockets/audio.sock";
+const SOCKET: &str = "/tmp/zykro-android/audio.sock";
 const CABECERA: usize = 0x400;
 const ENTRADAS: usize = 0x40;
 /// Sonido guardado en el servidor: lo justo para no cortarse.
@@ -104,8 +103,7 @@ fn sesion(ultimo_reinicio: &mut Option<Instant>) -> io::Result<()> {
     while !Path::new(SOCKET).exists() {
         thread::sleep(Duration::from_millis(500));
     }
-    // El servidor atiende a un solo cliente de audio y no se entera de que uno anterior murió (no
-    // vuelve a escribir en su socket): si no acepta o no saluda, se reinicia, como mucho una vez por minuto.
+    // Si el servidor no acepta o no saluda, está trabado: se reinicia, como mucho una vez por minuto.
     let saludado = conectar().and_then(|socket| {
         socket.set_read_timeout(Some(Duration::from_secs(4)))?;
         saludo(&socket).map(|(anillo, formato)| (socket, anillo, formato))
@@ -115,7 +113,7 @@ fn sesion(ultimo_reinicio: &mut Option<Instant>) -> io::Result<()> {
         Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
             if ultimo_reinicio.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
                 *ultimo_reinicio = Some(Instant::now());
-                let _ = Command::new("docker").args(["exec", CONTENEDOR, "setprop", "ctl.restart", "swag-rust-server"]).status();
+                crate::android::reiniciar_servidor();
                 return Err(io::Error::other("el servidor de audio no contestaba: se reinició"));
             }
             return Err(e);

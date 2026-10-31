@@ -1,6 +1,6 @@
-//! Scroll con la rueda del mouse y el touchpad. Android no aplica el scroll de mouse que inyecta
-//! swag-rust-server (mensaje 0x03, ver docs/investigacion.md), así que se imita como en una pantalla
-//! táctil: un dedo que se baja donde está el cursor y se arrastra.
+//! Scroll con la rueda del mouse y el touchpad. Se imita como en una pantalla táctil: un dedo que se
+//! baja donde está el cursor y se arrastra. Así funciona en cualquier app, también en las que no
+//! atienden el scroll de un mouse.
 
 use std::time::{Duration, Instant};
 

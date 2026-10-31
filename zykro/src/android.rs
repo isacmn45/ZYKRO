@@ -1,9 +1,8 @@
-//! Encender Android (el contenedor redroid que creó SwagPlayer) y conectarse a swag-rust-server.
+//! Encender Android (un contenedor redroid con la imagen de ZYKRO, ver imagen/) y conectarse a su
+//! servidor (servidor/): la pantalla, los toques y el sonido.
 
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -14,8 +13,15 @@ use crate::config::{self, Config};
 use crate::control::Control;
 use crate::video::{self, Compartido};
 
-pub const CONTENEDOR: &str = "redroid-redroid-1";
-const SOCKETS: &str = "/tmp/swag_sockets";
+pub const CONTENEDOR: &str = "zykro-android";
+/// Imagen con la que se crea (la arma imagen/construir.sh).
+const IMAGEN: &str = "zykro-android:9";
+/// Volumen con los datos de Android: apps, partidas y sesiones.
+const VOLUMEN: &str = "zykro-android-datos";
+/// Sockets del servidor de ZYKRO: en Android es /data/local/tmp/zykro.
+pub const SOCKETS: &str = "/tmp/zykro-android";
+/// Dónde escucha ADB en la laptop (Configuración › Avanzado lo enciende).
+const PUERTO_ADB: &str = "127.0.0.1:5555";
 
 /// Paso del arranque en el que está Android (para la pantalla de carga).
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -87,6 +93,42 @@ fn docker(args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
+fn existe() -> bool {
+    docker(&["container", "inspect", CONTENEDOR])
+}
+
+/// Crea el contenedor de Android (la primera vez, o si se borró). Los datos van en su volumen.
+fn crear(android: &config::Android) -> Result<(), String> {
+    if !docker(&["image", "inspect", IMAGEN]) {
+        return Err(format!("Falta la imagen de Android ({IMAGEN}): corre ./instalar.sh"));
+    }
+    let _ = std::fs::create_dir_all(SOCKETS);
+    crate::telefono::escribir(android.perfil).map_err(|e| e.to_string())?;
+    let telefono = crate::telefono::archivo();
+    let mut run: Vec<String> = [
+        "run", "-d", "--name", CONTENEDOR, "--privileged", "--security-opt", "label=disable", "--shm-size", "64m",
+        "-v", &format!("{SOCKETS}:/data/local/tmp/zykro"), "-v", &format!("{VOLUMEN}:/data"),
+        "-v", &format!("{}:/product/build.prop:ro", telefono.display()),
+        "-p", &format!("{PUERTO_ADB}:5555"), "--entrypoint", "/init", IMAGEN,
+        // GPU de la laptop; memfd en vez de ashmem (los kernels nuevos ya no lo traen).
+        "androidboot.hardware=redroid", "androidboot.redroid_gpu_mode=host", "androidboot.use_memfd=1",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    run.extend(android.argumentos().into_iter().filter_map(|(k, v)| Some(format!("{k}={}", v?))));
+    // En el idioma de la laptop (es_MX.UTF-8 -> es-MX); se cambia en Configuración › Android.
+    let idioma = ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|v| std::env::var(v).ok().filter(|l| !l.is_empty()));
+    if let Some(idioma) = idioma.map(|l| l.split(['.', '@']).next().unwrap_or("").replace('_', "-")).filter(|l| l.len() >= 2 && l != "C" && l != "POSIX") {
+        run.push(format!("ro.product.locale={idioma}"));
+    }
+    let creado = Command::new("docker").args(&run).output().map_err(|e| e.to_string())?;
+    if !creado.status.success() {
+        return Err(String::from_utf8_lossy(&creado.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
 fn corriendo() -> bool {
     Command::new("docker")
         .args(["inspect", "-f", "{{.State.Running}}", CONTENEDOR])
@@ -144,7 +186,7 @@ pub fn iniciar(ctx: egui::Context, estado: EstadoCompartido, destino: Compartido
                     pendiente = Some(config::Android::desde_argumentos(&args));
                 }
             }
-            if let Some(nueva) = pendiente {
+            if let Some(nueva) = pendiente.filter(|_| existe()) {
                 mensaje(&estado, Etapa::Encender, "Reiniciando Android con la nueva configuración…");
                 ctx.request_repaint();
                 match recrear(&nueva) {
@@ -180,9 +222,22 @@ pub fn iniciar(ctx: egui::Context, estado: EstadoCompartido, destino: Compartido
 }
 
 fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &Compartido) -> std::io::Result<()> {
-    if !corriendo() {
+    // La carpeta de los sockets está en /tmp, que se vacía al apagar la laptop. Si Docker la creara,
+    // sería de root.
+    let _ = std::fs::create_dir_all(SOCKETS);
+    if !existe() {
+        mensaje(estado, Etapa::Encender, "Preparando Android por primera vez…");
+        ctx.request_repaint();
+        let android = estado.lock().unwrap().config.android.clone();
+        crear(&android).map_err(|e| std::io::Error::other(format!("No se pudo crear Android: {e}")))?;
+    } else if !corriendo() {
         mensaje(estado, Etapa::Encender, "Encendiendo Android…");
         ctx.request_repaint();
+        // Si se borró el archivo del teléfono, Docker montaría una carpeta en su lugar.
+        if !crate::telefono::archivo().exists() {
+            let perfil = estado.lock().unwrap().config.android.perfil;
+            let _ = crate::telefono::escribir(perfil);
+        }
         if !docker(&["start", CONTENEDOR]) {
             return Err(std::io::Error::other("No se pudo encender Android. ¿Está corriendo Docker?"));
         }
@@ -192,76 +247,36 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
     ctx.request_repaint();
     let ruta_video = format!("{SOCKETS}/video.sock");
     let ruta_control = format!("{SOCKETS}/control.sock");
-    let inicio = Instant::now();
     let mut socket_video = loop {
         if Path::new(&ruta_video).exists() && Path::new(&ruta_control).exists() {
-            match UnixStream::connect(&ruta_video) {
+            match video::conectar(&ruta_video) {
                 Ok(socket) => break socket,
                 // Mientras Android arranca quedan los sockets de la sesión anterior, sin nadie
                 // escuchando: se sigue esperando a que el servidor los vuelva a crear.
-                Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {}
+                Err(e) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound) => {}
                 Err(e) => return Err(e),
             }
-        }
-        if inicio.elapsed() > Duration::from_secs(20) {
-            // El servidor borra video.sock cuando otro cliente se conecta.
-            mensaje(estado, Etapa::Arrancar, "Esperando a Android…\n¿SwagPlayer está abierto? Ciérralo: solo uno puede conectarse.");
-            ctx.request_repaint();
         }
         thread::sleep(Duration::from_millis(300));
     };
 
     mensaje(estado, Etapa::Conectar, "Conectando…");
     ctx.request_repaint();
-    let (android, ocultar_teclado) = {
-        let s = estado.lock().unwrap();
-        (s.config.android.clone(), s.config.ocultar_teclado)
-    };
-    let control = Control::conectar(&ruta_control, android.lod_activado, android.lod)?;
+    let ocultar_teclado = estado.lock().unwrap().config.ocultar_teclado;
+    let control = Control::conectar(&ruta_control)?;
 
-    // El servidor no manda nada hasta que la pantalla cambia: apagar y prender la pantalla la redibuja.
-    // El servidor atiende a un solo cliente y, si el anterior se cerró de golpe, no se entera hasta
-    // que le toca mandar un cuadro: nuestra conexión se queda en cola y no llega la cabecera.
-    // Tras dos intentos se reinicia el servidor y se vuelve a conectar.
-    socket_video.set_read_timeout(Some(Duration::from_secs(4)))?;
-    let mut intentos = 0;
-    let pantalla = loop {
-        redibujar(&control);
-        match video::leer_cabecera(&mut socket_video) {
-            Ok(p) => break p,
-            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
-                intentos += 1;
-                if intentos >= 2 {
-                    reiniciar_servidor();
-                    return Err(std::io::Error::other("El servidor de video no respondía: se reinició"));
-                }
-            }
-            Err(e) => return Err(e),
+    // El servidor manda la cabecera y el cuadro actual en cuanto se conecta. Si no llegan, está
+    // trabado: se reinicia y se vuelve a conectar.
+    socket_video.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let pantalla = match video::leer_cabecera(&mut socket_video) {
+        Ok(p) => p,
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+            reiniciar_servidor();
+            return Err(std::io::Error::other("El servidor de video no respondía: se reinició"));
         }
+        Err(e) => return Err(e),
     };
     socket_video.set_read_timeout(None)?;
-
-    // A veces, tras la cabecera, el primer cuadro no llega; con la pantalla quieta (escritorio,
-    // menús) el servidor no manda otro y se quedaba la pantalla de carga hasta tocar algo.
-    // Si en 1.5 s no llegó ninguno, se vuelve a redibujar (hasta 3 veces); si ni así, el servidor
-    // está trabado: se reinicia y la conexión cortada hace que se vuelva a conectar.
-    let llego = Arc::new(AtomicBool::new(false));
-    {
-        let (llego, control) = (llego.clone(), control.clone());
-        thread::spawn(move || {
-            for intento in 0..4 {
-                thread::sleep(Duration::from_millis(1500));
-                if llego.load(Ordering::Relaxed) {
-                    return;
-                }
-                if intento < 3 {
-                    redibujar(&control);
-                } else {
-                    reiniciar_servidor();
-                }
-            }
-        });
-    }
 
     {
         let mut s = estado.lock().unwrap();
@@ -287,22 +302,12 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
     }
 
     let ctx2 = ctx.clone();
-    video::recibir_cuadros(socket_video, destino.clone(), move || {
-        llego.store(true, Ordering::Relaxed);
-        ctx2.request_repaint();
-    })
+    video::recibir_cuadros(socket_video, destino.clone(), move || ctx2.request_repaint())
 }
 
-/// Reinicia swag-rust-server (un servicio de Android) sin reiniciar Android; corta sus conexiones.
-fn reiniciar_servidor() {
-    docker(&["exec", CONTENEDOR, "setprop", "ctl.restart", "swag-rust-server"]);
-}
-
-/// Apaga y prende la pantalla de Android para que se redibuje (y el servidor mande un cuadro).
-fn redibujar(control: &Control) {
-    control.pulsar(223); // KEYCODE_SLEEP
-    thread::sleep(Duration::from_millis(250));
-    control.pulsar(224); // KEYCODE_WAKEUP
+/// Reinicia el servidor de ZYKRO (un servicio de Android) sin reiniciar Android; corta sus conexiones.
+pub fn reiniciar_servidor() {
+    docker(&["exec", CONTENEDOR, "setprop", "ctl.restart", "zykro-servidor"]);
 }
 
 /// Android arranca con la hora UTC: se le pone la zona horaria de la laptop para que su reloj (el de la
@@ -359,15 +364,20 @@ const SOBRANTES: &[&str] = &[
     // Inicio de sesión de redes Wi-Fi públicas (la red sale de Docker).
     "com.android.captiveportallogin",
     "com.android.hotspot2.osulogin",
-    // Calendario, sincronizar contactos con Google, ecualizador, verificar enlaces, marcadores y el
-    // visor de licencias.
+    // Calendario, correo, sincronizar contactos con Google, ecualizador, verificar enlaces,
+    // marcadores, el visor de licencias, la barra de búsqueda de Google de AOSP y el navegador de
+    // pruebas de WebView.
     "com.android.providers.calendar",
+    "com.android.calendar",
+    "com.android.email",
     "com.google.android.syncadapters.calendar",
     "com.google.android.syncadapters.contacts",
     "com.android.musicfx",
     "com.android.statementservice",
     "com.android.bookmarkprovider",
     "com.android.htmlviewer",
+    "com.android.quicksearchbox",
+    "org.chromium.webview_shell",
     // Lo que Google Play instala solo: SafetyCore (revisa las imágenes de los mensajes), los
     // verificadores de contactos y de desarrolladores (este revisa las apps instaladas por fuera de la
     // tienda, como la pantalla de inicio de ZYKRO) y realidad aumentada. Si Play las reinstala, se
@@ -455,23 +465,13 @@ fn permisos_inicio() {
 }
 
 /// Usa teclado-android (`bin/` de este repositorio) para que Android no muestre su teclado en pantalla.
+/// El aviso «Configura el teclado físico» que eso provoca lo pospone la pantalla de inicio de ZYKRO.
 fn ocultar_teclado_en_pantalla() {
-    // Con el teclado falso, Android avisa «Configura el teclado físico» (no tiene distribución
-    // elegida). No hay orden para bloquear ese canal, pero sí para posponer el aviso: un año. Si
-    // vuelve a salir mientras está pospuesto, sigue oculto.
     thread::spawn(|| {
         if let Some(home) = std::env::var_os("HOME") {
             let script = PathBuf::from(home).join(".local/bin/teclado-android");
             if script.exists() {
                 let _ = Command::new(script).arg("ocultar").stdout(Stdio::null()).stderr(Stdio::null()).status();
-            }
-        }
-        const AVISO: &str = "-1|android|19|null|1000";
-        for _ in 0..20 {
-            thread::sleep(Duration::from_secs(1));
-            if shell("cmd notification list").unwrap_or_default().lines().any(|l| l.trim() == AVISO) {
-                shell(&format!("cmd notification snooze --for 31536000000 '{AVISO}'"));
-                return;
             }
         }
     });
@@ -516,55 +516,28 @@ pub fn vigilar_peticiones(ctx: egui::Context, estado: EstadoCompartido) {
         .expect("no se pudo crear el hilo de peticiones");
 }
 
-/// Vigila los cambios de foco de Android para saber cuándo un juego abre su cuadro de texto
-/// (en Unity es una ventana aparte que pide el teclado siempre visible).
+/// Sabe cuándo un juego abre su cuadro de texto (en Unity es una ventana aparte que pide el teclado
+/// siempre visible): el servidor de ZYKRO lo deja en el archivo `texto` (1 o 0).
 pub fn vigilar_texto(ctx: egui::Context, estado: EstadoCompartido) {
-    use std::io::{BufRead, BufReader};
+    let ruta = format!("{SOCKETS}/texto");
     thread::Builder::new()
         .name("zykro-texto".into())
-        .spawn(move || loop {
-            let hijo = Command::new("docker")
-                .args(["exec", CONTENEDOR, "logcat", "-b", "events", "-s", "input_focus", "-T", "1"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn();
-            if let Ok(mut hijo) = hijo {
-                let mut cuadro: Option<String> = None;
-                for linea in BufReader::new(hijo.stdout.take().unwrap()).lines().skip(1).map_while(Result::ok) {
-                    let Some(resto) = linea.split("Focus ").nth(1) else { continue };
-                    let mut partes = resto.split_whitespace();
-                    let (Some(accion), Some(ventana)) = (partes.next(), partes.next()) else { continue };
-                    let nuevo = match accion {
-                        "entering" if es_cuadro_texto(ventana) => Some(ventana.to_string()),
-                        "entering" => None,
-                        "leaving" if cuadro.as_deref() == Some(ventana) => None,
-                        _ => continue,
-                    };
-                    if nuevo.is_some() != cuadro.is_some() {
-                        estado.lock().unwrap().escribiendo = nuevo.is_some();
-                        ctx.request_repaint();
-                    }
-                    cuadro = nuevo;
+        .spawn(move || {
+            let mut antes = false;
+            loop {
+                let ahora = std::fs::read_to_string(&ruta).is_ok_and(|t| t.trim() == "1");
+                if ahora != antes {
+                    estado.lock().unwrap().escribiendo = ahora;
+                    ctx.request_repaint();
+                    antes = ahora;
                 }
-                let _ = hijo.wait();
+                thread::sleep(Duration::from_millis(250));
             }
-            estado.lock().unwrap().escribiendo = false;
-            thread::sleep(Duration::from_secs(2));
         })
         .expect("no se pudo crear el hilo de texto");
 }
 
-fn es_cuadro_texto(ventana: &str) -> bool {
-    let Ok(salida) = Command::new("docker").args(["exec", CONTENEDOR, "dumpsys", "window", "windows"]).output() else {
-        return false;
-    };
-    let texto = String::from_utf8_lossy(&salida.stdout);
-    let Some(resto) = texto.split(&format!("Window{{{ventana} ")).nth(1) else { return false };
-    let bloque: String = resto.chars().take(3000).collect();
-    !bloque.contains("BASE_APPLICATION") && bloque.contains("always_visible")
-}
-
-/// Paquete de la app en primer plano, según swag-rust-server.
+/// Paquete de la app en primer plano, según el servidor de ZYKRO.
 pub fn app_activa() -> Option<String> {
     let texto = std::fs::read_to_string(format!("{SOCKETS}/active_app")).ok()?;
     texto.lines().find_map(|l| l.strip_prefix("package=").or_else(|| l.strip_prefix("Package=")).map(|p| p.trim().to_string()))
@@ -578,9 +551,8 @@ pub struct Tarea {
     pub paquete: String,
 }
 
-/// Apps abiertas, de la más reciente a la más vieja, sin el launcher. Android no tiene vista de
-/// recientes sin Quickstep, así que ZYKRO las saca de `am stack list` y las ordena con
-/// `dumpsys activity recents`.
+/// Apps abiertas, de la más reciente a la más vieja, sin el launcher. ZYKRO las saca de
+/// `am stack list` (en Android 9 cada app tiene su pila) y las ordena con `dumpsys activity recents`.
 pub fn tareas_abiertas() -> Vec<Tarea> {
     let consulta = "cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1; \
                     echo ===; am stack list; echo ===; dumpsys activity recents | grep 'Recent #'";
@@ -590,16 +562,17 @@ pub fn tareas_abiertas() -> Vec<Tarea> {
     let inicio = partes.next().unwrap_or("").trim().split('/').next().unwrap_or("").to_string();
     let (pila, recientes) = (partes.next().unwrap_or(""), partes.next().unwrap_or(""));
 
-    // Orden: "* Recent #0: Task{1412083 #16 type=home ...}" -> la tarea 16 es la más reciente.
+    // Orden: "* Recent #0: TaskRecord{e6d0614 #8 A=com.android.gallery3d ...}" -> la tarea 8 es la
+    // más reciente.
     let orden: Vec<u32> = recientes
         .lines()
-        .filter_map(|l| l.split("Task{").nth(1)?.split_whitespace().nth(1)?.strip_prefix('#')?.parse().ok())
+        .filter_map(|l| l.split("TaskRecord{").nth(1)?.split_whitespace().nth(1)?.strip_prefix('#')?.parse().ok())
         .collect();
 
     let mut tareas = Vec::new();
     let mut raiz = 0;
     for linea in pila.lines() {
-        if let Some(resto) = linea.strip_prefix("RootTask id=") {
+        if let Some(resto) = linea.strip_prefix("Stack id=") {
             raiz = resto.split_whitespace().next().and_then(|n| n.parse().ok()).unwrap_or(0);
         } else if let Some(resto) = linea.trim_start().strip_prefix("taskId=") {
             // "taskId=17: com.android.settings/com.android.settings.Settings bounds=..."
@@ -701,12 +674,13 @@ fn argumentos_contenedor() -> Option<Vec<String>> {
     )
 }
 
-/// Recrea el contenedor con los mismos ajustes de Docker que le puso SwagPlayer, cambiando solo
+/// Recrea el contenedor con los mismos ajustes de Docker con que se creó, cambiando solo
 /// los argumentos de arranque que maneja ZYKRO. Los datos de Android (volumen) no se tocan.
 fn recrear(nueva: &config::Android) -> Result<(), String> {
     let salida = Command::new("docker").args(["inspect", CONTENEDOR]).output().map_err(|e| e.to_string())?;
     let info: serde_json::Value = serde_json::from_slice(&salida.stdout).map_err(|e| e.to_string())?;
     let run = comando_run(&info, nueva)?;
+    crate::telefono::escribir(nueva.perfil).map_err(|e| e.to_string())?;
 
     // Se guarda el contenedor viejo con otro nombre por si el nuevo no arranca.
     let respaldo = format!("{CONTENEDOR}-respaldo");

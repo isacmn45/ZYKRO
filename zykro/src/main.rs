@@ -1,4 +1,4 @@
-//! ZYKRO: ventana propia para el Android de SwagPlayer (redroid + swag-rust-server).
+//! ZYKRO: ventana propia para su Android (redroid 9 con el servidor de ZYKRO, ver imagen/ y servidor/).
 //! Diseño inspirado en LDPlayer: barra de título oscura y barra lateral delgada con herramientas.
 
 mod accesos;

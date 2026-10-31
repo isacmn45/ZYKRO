@@ -1,6 +1,6 @@
-//! Video sin comprimir desde `video.sock`: el servidor comparte los buffers de pantalla de Android
-//! (DMA-BUF) y avisa cuál mostrar. Formato en docs/investigacion.md. La ventana los muestra directo
-//! desde la GPU (`textura.rs`), sin copiarlos.
+//! Video sin comprimir desde `video.sock`: el servidor de ZYKRO comparte los buffers de pantalla de
+//! Android (DMA-BUF) y avisa cuál mostrar. Formato en servidor/src/com/zykro/servidor/Video.java. La
+//! ventana los muestra directo desde la GPU (`textura.rs`), sin copiarlos.
 
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
@@ -14,7 +14,7 @@ use std::time::Instant;
 use eframe::egui::{Color32, ColorImage};
 use memmap2::{Mmap, MmapOptions};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
-use nix::sys::socket::{recvmsg, ControlMessageOwned, MsgFlags};
+use nix::sys::socket::{connect, recvmsg, socket, AddressFamily, ControlMessageOwned, MsgFlags, SockFlag, SockType, UnixAddr};
 
 const DMA_BUF_IOCTL_SYNC: libc::c_ulong = 0x4008_6200;
 const SYNC_READ: u64 = 1;
@@ -171,8 +171,15 @@ fn recibir(socket: &UnixStream, buf: &mut [u8]) -> io::Result<(usize, Vec<OwnedF
     Ok((msg.bytes, fds))
 }
 
-/// Lee la cabecera. Bloquea hasta que Android redibuja la pantalla por primera vez,
-/// así que hay que forzar un redibujado después de conectar.
+/// Conecta a `video.sock`. Es SOCK_SEQPACKET: cada aviso llega entero y solo, nunca pegado al
+/// siguiente (con un socket de flujo, dos avisos seguidos se leían juntos y se perdía uno).
+pub fn conectar(ruta: &str) -> io::Result<UnixStream> {
+    let fd = socket(AddressFamily::Unix, SockType::SeqPacket, SockFlag::SOCK_CLOEXEC, None).map_err(io::Error::from)?;
+    connect(fd.as_raw_fd(), &UnixAddr::new(ruta).map_err(io::Error::from)?).map_err(io::Error::from)?;
+    Ok(UnixStream::from(fd))
+}
+
+/// Lee la cabecera (el servidor la manda al conectar, junto con el cuadro actual).
 pub fn leer_cabecera(socket: &mut UnixStream) -> io::Result<Pantalla> {
     let mut cab = [0u8; 21];
     socket.read_exact(&mut cab)?;

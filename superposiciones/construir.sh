@@ -1,11 +1,10 @@
 #!/bin/sh
-# Compila las superposiciones que hacen compacta la interfaz de Android en una ventana de laptop:
-#   configuracion/ -> configuracion.apk (la app de Configuración)
-#   sistema/       -> sistema.apk (el centro de control y las notificaciones, SystemUI)
+# Compila las superposiciones de la interfaz de Android:
+#   marco/ -> marco.apk (sin barra de estado ni de navegación)
 # Solo recursos. Necesita Java para firmar y, del SDK de Android, la plataforma 33 y las build-tools 34:
 #   $ANDROID_HOME (o ~/Android/Sdk)/platforms/android-33 y build-tools/34.0.0
 # La llave de firma se crea la primera vez (firma.keystore) y no se sube al repositorio. Van en la
-# imagen de Android de ZYKRO (houdini/construir.sh).
+# imagen de Android de ZYKRO (imagen/construir.sh).
 set -e
 cd "$(dirname "$0")"
 SDK="${ANDROID_HOME:-$HOME/Android/Sdk}"
@@ -23,10 +22,10 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 # Sin deduplicar: aapt2 quita una variante (por ejemplo, horizontal) si vale lo mismo que la general,
 # pero aquí hace falta para tapar la variante propia de la app.
-for nombre in configuracion sistema; do
+for nombre in marco; do
     "$HERRAMIENTAS/aapt2" compile --dir "$nombre/res" -o "$TMP/$nombre.zip"
     "$HERRAMIENTAS/aapt2" link -o "$TMP/$nombre-base.apk" -I "$ANDROID_JAR" --manifest "$nombre/AndroidManifest.xml" \
-        --min-sdk-version 30 --target-sdk-version 33 --version-code 1 --version-name 1.0 --no-resource-deduping \
+        --min-sdk-version 28 --target-sdk-version 28 --version-code 1 --version-name 1.0 --no-resource-deduping \
         "$TMP/$nombre.zip"
     "$HERRAMIENTAS/zipalign" -f 4 "$TMP/$nombre-base.apk" "$TMP/$nombre-alineado.apk"
     "$HERRAMIENTAS/apksigner" -J-enable-native-access=ALL-UNNAMED sign --ks firma.keystore \

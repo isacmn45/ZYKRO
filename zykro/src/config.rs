@@ -51,6 +51,9 @@ pub struct Config {
 pub const BATERIA_FIJA: &str = "androidboot.fake_battery";
 const VULKAN: &str = "ro.hardware.vulkan";
 const NODO_GPU: &str = "androidboot.redroid_gpu_node";
+/// El teléfono elegido (su número en `telefono::PERFILES`): sus propiedades van en un archivo aparte
+/// (`telefono::archivo`), y este argumento solo lo recuerda.
+const PERFIL: &str = "androidboot.zykro_perfil";
 
 /// Lo que se aplica reiniciando Android.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -60,8 +63,6 @@ pub struct Android {
     pub alto: u32,
     pub dpi: u32,
     pub fps: u32,
-    pub lod_activado: bool,
-    pub lod: f32,
     /// Vulkan para las apps; sin él, solo OpenGL ES.
     pub vulkan: bool,
     /// Teléfono que anuncia Android (`telefono::PERFILES`); `None` = otro, no se toca.
@@ -99,7 +100,7 @@ impl Default for Config {
 
 impl Default for Android {
     fn default() -> Self {
-        Android { ancho: 1280, alto: 720, dpi: 240, fps: 60, lod_activado: true, lod: 0.5, vulkan: true, perfil: Some(0), gpu: None }
+        Android { ancho: 1280, alto: 720, dpi: 240, fps: 60, vulkan: true, perfil: Some(0), gpu: None }
     }
 }
 
@@ -144,8 +145,6 @@ impl Android {
             ("androidboot.redroid_dpi", self.dpi.to_string()),
             ("androidboot.redroid_fps", self.fps.to_string()),
             ("androidboot.qemu.vsync", self.fps.to_string()),
-            ("debug.mesa.swag.lod.bias.enabled", (self.lod_activado as u8).to_string()),
-            ("debug.mesa.swag.lod.bias", format!("{:.2}", self.lod)),
             // Batería falsa fija (42 %): Android lee la batería de la laptop y, al verla en 0 % sin
             // cargador, se apagaba solo («shutdown,battery»).
             (BATERIA_FIJA, "1".into()),
@@ -156,9 +155,7 @@ impl Android {
         // Sin Vulkan: el script de la GPU de Android ya no puede ponerlo (las `ro.` se escriben una vez).
         args.push((VULKAN.into(), (!self.vulkan).then(|| "none".into())));
         args.push((NODO_GPU.into(), self.gpu.clone()));
-        if let Some(perfil) = self.perfil.and_then(|i| crate::telefono::PERFILES.get(i)) {
-            args.extend(perfil.argumentos().into_iter().map(|(k, v)| (k, Some(v))));
-        }
+        args.push((PERFIL.into(), self.perfil.map(|i| i.to_string())));
         args
     }
 
@@ -171,14 +168,12 @@ impl Android {
                 "androidboot.redroid_height" => a.alto = valor.parse().unwrap_or(a.alto),
                 "androidboot.redroid_dpi" => a.dpi = valor.parse().unwrap_or(a.dpi),
                 "androidboot.redroid_fps" => a.fps = valor.parse().unwrap_or(a.fps),
-                "debug.mesa.swag.lod.bias.enabled" => a.lod_activado = valor == "1",
-                "debug.mesa.swag.lod.bias" => a.lod = valor.parse().unwrap_or(a.lod),
                 VULKAN => a.vulkan = valor != "none",
                 NODO_GPU => a.gpu = Some(valor.to_string()),
                 _ => {}
             }
         }
-        a.perfil = crate::telefono::Perfil::desde_argumentos(args);
+        a.perfil = args.iter().find_map(|a| a.strip_prefix(&format!("{PERFIL}="))?.parse().ok());
         a
     }
 }

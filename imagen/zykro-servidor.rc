@@ -1,0 +1,11 @@
+# Servidor de ZYKRO (servidor/): comparte la pantalla, recibe toques y teclas y pasa el sonido por
+# sockets en /data/local/tmp/zykro, una carpeta que también ve Linux.
+service zykro-servidor /system/bin/app_process /system/bin com.zykro.servidor.Servidor /data/local/tmp/zykro
+    class main
+    user root
+    group root graphics input audio system shell
+    setenv CLASSPATH /system/framework/zykro-servidor.jar
+    disabled
+
+on property:sys.boot_completed=1
+    start zykro-servidor

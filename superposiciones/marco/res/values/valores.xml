@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reemplazan valores del marco de Android (mismos nombres). -->
+<resources>
+    <!-- Barra de estado de alto cero: las apps usan toda la pantalla y Android no la dibuja. -->
+    <dimen name="status_bar_height">0dp</dimen>
+    <dimen name="status_bar_height_portrait">0dp</dimen>
+    <dimen name="status_bar_height_landscape">0dp</dimen>
+    <!-- Sin botones de Atrás, Inicio y Recientes en pantalla: están en la barra de ZYKRO. -->
+    <bool name="config_showNavigationBar">false</bool>
+</resources>

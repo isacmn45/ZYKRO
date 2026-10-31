@@ -17,13 +17,13 @@ trap 'rm -rf "$TMP"' EXIT
 
 "$HERRAMIENTAS/aapt2" compile --dir res -o "$TMP/recursos.zip"
 "$HERRAMIENTAS/aapt2" link -o "$TMP/base.apk" -I "$ANDROID_JAR" --manifest AndroidManifest.xml \
-    --min-sdk-version 30 --target-sdk-version 33 --version-code 7 --version-name 1.6 \
+    --min-sdk-version 28 --target-sdk-version 33 --version-code 8 --version-name 1.7 \
     --java "$TMP/gen" "$TMP/recursos.zip"
 
 # Concatenar texto sin invokedynamic: así d8 no tiene nada que traducir.
 javac --release 17 -XDstringConcat=inline -nowarn -encoding UTF-8 -classpath "$ANDROID_JAR" -d "$TMP/clases" \
     $(find src "$TMP/gen" -name '*.java')
-"$HERRAMIENTAS/d8" --release --min-api 30 --lib "$ANDROID_JAR" --output "$TMP" $(find "$TMP/clases" -name '*.class')
+"$HERRAMIENTAS/d8" --release --min-api 28 --lib "$ANDROID_JAR" --output "$TMP" $(find "$TMP/clases" -name '*.class')
 (cd "$TMP" && jar uMf base.apk classes.dex)
 "$HERRAMIENTAS/zipalign" -f 4 "$TMP/base.apk" "$TMP/alineado.apk"
 

@@ -17,7 +17,7 @@ const EXCLUIR: [&str; 3] = ["./dalvik-cache", "./local/tmp", "./cache"];
 pub fn limpiar() -> String {
     // Si la lista de apps no sale completa (Android ocupado), no se borra nada: si no, se irían los
     // datos de todas. La pantalla de inicio de ZYKRO siempre está instalada. En /data/local/tmp se
-    // quedan las conexiones y archivos del servidor de video (swag*) y el teclado de ZYKRO.
+    // quedan los sockets del servidor de ZYKRO (zykro) y su teclado.
     let orden = "antes=$(du -sk /data/media/0/Android | cut -f1); \
                  instaladas=$(pm list packages | cut -d: -f2); \
                  echo \"$instaladas\" | grep -qx com.zykro.inicio || exit 1; \
@@ -25,7 +25,7 @@ pub fn limpiar() -> String {
                    [ -d \"$d\" ] || continue; p=${d##*/}; \
                    echo \"$instaladas\" | grep -qx \"$p\" || rm -rf \"$d\"; \
                  done; \
-                 for f in /data/local/tmp/*; do case \"${f##*/}\" in swag*|teclado-fisico) ;; *) rm -rf \"$f\" ;; esac; done; \
+                 for f in /data/local/tmp/*; do case \"${f##*/}\" in zykro|teclado-fisico) ;; *) rm -rf \"$f\" ;; esac; done; \
                  echo $((antes - $(du -sk /data/media/0/Android | cut -f1)))";
     match android::shell(orden).and_then(|s| s.trim().lines().last().and_then(|l| l.parse::<i64>().ok())) {
         Some(kb) if kb > 1024 => format!("Listo: se liberaron {}", tamano(kb as u64 * 1024)),
@@ -100,16 +100,14 @@ pub fn restaurar(origen: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Corre toybox de la imagen de Android con Android apagado: sin /apex (lo monta Android al arrancar)
-/// no hay enlazador, así que se usa el del primer arranque, con sus bibliotecas. No hay `sh`: cada
+/// Corre toybox de la imagen de Android con Android apagado. No hay `sh` fuera de Android: cada
 /// orden va sola. Devuelve si terminó bien.
 fn toybox(volumen: &str, imagen: &str, orden: &[&str], entrada: Option<std::fs::File>) -> Result<bool, String> {
     let mut docker = Command::new("docker");
     docker
         .args(["run", "--rm", "-i", "-v", &format!("{volumen}:/data")])
-        .args(["-e", "LD_LIBRARY_PATH=/system/lib64/bootstrap:/system/lib64", "--entrypoint", "/system/bin/bootstrap/linker64"])
+        .args(["--entrypoint", "/system/bin/toybox"])
         .arg(imagen)
-        .arg("/system/bin/toybox")
         .args(orden)
         .stdout(Stdio::null())
         .stderr(Stdio::null());

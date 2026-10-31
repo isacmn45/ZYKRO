@@ -2144,7 +2144,7 @@ mod pruebas {
         let ruta = std::env::temp_dir().join(format!("zykro-prueba-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&ruta);
         let servidor = UnixListener::bind(&ruta).unwrap();
-        let ctl = Control::conectar(ruta.to_str().unwrap(), false, 0.0).unwrap();
+        let ctl = Control::conectar(ruta.to_str().unwrap()).unwrap();
         let (mut socket, _) = servidor.accept().unwrap();
         let _ = std::fs::remove_file(&ruta);
 
@@ -2161,8 +2161,7 @@ mod pruebas {
 
         let mut datos = Vec::new();
         socket.read_to_end(&mut datos).unwrap();
-        let inicio = 2 + datos[1] as usize + 6; // 0x12 (layout) y 0x14
-        let toques: Vec<(u8, i32, i32)> = datos[inicio..]
+        let toques: Vec<(u8, i32, i32)> = datos
             .chunks_exact(32)
             .map(|m| {
                 assert_eq!(m[0], 0x02);
@@ -2184,7 +2183,7 @@ mod pruebas {
         let ruta = std::env::temp_dir().join(format!("zykro-prueba-{}-{n}.sock", std::process::id()));
         let _ = std::fs::remove_file(&ruta);
         let servidor = UnixListener::bind(&ruta).unwrap();
-        let ctl = Control::conectar(ruta.to_str().unwrap(), false, 0.0).unwrap();
+        let ctl = Control::conectar(ruta.to_str().unwrap()).unwrap();
         let (mut socket, _) = servidor.accept().unwrap();
         let _ = std::fs::remove_file(&ruta);
         let mut motor = Motor::new();
@@ -2193,8 +2192,7 @@ mod pruebas {
         drop(ctl);
         let mut datos = Vec::new();
         socket.read_to_end(&mut datos).unwrap();
-        let inicio = 2 + datos[1] as usize + 6;
-        datos[inicio..]
+        datos
             .chunks_exact(32)
             .filter(|m| m[0] == 0x02)
             .map(|m| {

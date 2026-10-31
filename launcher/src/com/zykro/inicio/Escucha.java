@@ -38,10 +38,19 @@ public class Escucha extends NotificationListenerService {
     private final Map<String, Long> alertas = new ConcurrentHashMap<>();
     /** El título y el texto con que se vio cada una, para saber si una actualización cambió algo. */
     private final Map<String, String> textos = new ConcurrentHashMap<>();
+    /** «Configura el teclado físico»: Android lo muestra por el teclado falso de ZYKRO (teclado-android). */
+    private static final int AVISO_TECLADO = 19;
+    private static final long UN_ANO = 365L * 24 * 60 * 60 * 1000;
 
     @Override
     public void onListenerConnected() {
         activa = this;
+        StatusBarNotification[] todas = getActiveNotifications();
+        if (todas != null) {
+            for (StatusBarNotification sbn : todas) {
+                posponerAvisoTeclado(sbn);
+            }
+        }
         exportar(false);
     }
 
@@ -54,11 +63,28 @@ public class Escucha extends NotificationListenerService {
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn, RankingMap ranking) {
+        if (posponerAvisoTeclado(sbn)) {
+            return;
+        }
         boolean aviso = avisa(sbn, ranking);
         if (aviso) {
             alertas.put(sbn.getKey(), System.currentTimeMillis());
         }
         exportar(aviso);
+    }
+
+    /** El aviso del teclado físico se pospone un año (no hay forma de apagar ese canal). */
+    private boolean posponerAvisoTeclado(StatusBarNotification sbn) {
+        if (!"android".equals(sbn.getPackageName()) || sbn.getId() != AVISO_TECLADO) {
+            return false;
+        }
+        snoozeNotification(sbn.getKey(), UN_ANO);
+        return true;
+    }
+
+    /** «No molestar» desde el panel de ZYKRO: solo las notificaciones prioritarias, o todas. */
+    void noMolestar(boolean activo) {
+        requestInterruptionFilter(activo ? INTERRUPTION_FILTER_PRIORITY : INTERRUPTION_FILTER_ALL);
     }
 
     @Override

@@ -1,12 +1,18 @@
 # ZYKRO
 
-Emulador de Android para jugar en Linux, hecho para KDE Plasma en Wayland. Usa el Android de
-[SwagPlayer](https://swagplayer.com) (un contenedor redroid con `swag-rust-server`) y le pone una
-ventana propia, con la imagen directo desde la GPU, sonido, mapeo de teclas y una puntería que se siente
-como la de BlueStacks.
+Emulador de Android para jugar en Linux, hecho para KDE Plasma en Wayland. Corre Android 9 en un
+contenedor [redroid](https://github.com/remote-android/redroid-doc) (código abierto), con traducción de
+apps ARM y Google Play, y le pone una ventana propia: la imagen directo desde la GPU, sonido, mapeo de
+teclas y una puntería que se siente como la de BlueStacks. Todo lo que hay entre la ventana y Android
+(el servidor de pantalla, toques y sonido) es de este repositorio.
 
 ## Qué tiene
 
+- **Android propio y ligero:** Android 9 de redroid con la GPU de la laptop (Mesa 24), Houdini para las
+  apps ARM de 32 bits (Free Fire incluido), Google Play y el servidor de ZYKRO, que pasa la pantalla,
+  los toques y el sonido. ZYKRO crea el contenedor la primera vez que lo abres, en el idioma de la
+  laptop. Las apps que solo traen ARM de 64 bits no funcionan: no hay un traductor público para eso
+  en Android 9.
 - **Imagen sin comprimir y sin copias:** cada cuadro de Android llega como DMA-BUF y se dibuja directo
   desde la GPU. La ventana lleva su propio ritmo de cuadros con los avisos de KWin, para no sumar
   retraso.
@@ -27,15 +33,16 @@ como la de BlueStacks.
     (hasta 240).
   - *Pantalla:* orientación, resolución y DPI (también personalizados), tamaño de la interfaz de
     ZYKRO y un cursor propio, grande y visible sobre cualquier juego.
-  - *Gráficos:* Vulkan y OpenGL o solo OpenGL, la GPU de Android (con dos) y texturas suaves.
+  - *Gráficos:* Vulkan y OpenGL o solo OpenGL, y la GPU de Android (con dos).
   - *Juegos:* las apps que abren ZYKRO en pantalla completa.
   - *Dispositivos* y *Gamepad:* la salida de sonido, y los mandos de la laptop (USB o Bluetooth)
     llegan a Android como mandos propios, con sus botones en su lugar y vibración.
   - *Preferencias:* sonido al tocar, Esc para salir de la pantalla completa, notificaciones de
     Android en el escritorio, accesos directos de las apps en el menú de la laptop y la carpeta de
     capturas.
-  - *Teléfono:* el modelo que dice ser Android (Sony, Samsung, ASUS ROG, OnePlus, Xiaomi, Pixel) y la
-    operadora de telefonía.
+  - *Teléfono:* el modelo que dice ser Android (Pixel 3, Galaxy S10+, ZenFone 6, OnePlus 7 Pro, Mi 9,
+    Redmi Note 7; todos salieron con Android 9 y llevan la huella de su versión real, la que revisa
+    Google Play) y la operadora de telefonía.
   - *Atajos:* las teclas de cada acción (ocultar ZYKRO, captura, volumen, inicio, controles…).
   - *Datos del usuario:* limpieza del disco y respaldo y restauración de todo Android en un archivo.
   - *Avanzado* y *Acerca de:* las arquitecturas, ADB (se autoriza solo) y buscar actualizaciones.
@@ -51,9 +58,8 @@ como la de BlueStacks.
 - **Ajustes de Android compactos** dentro de ZYKRO, con el botón «Ajustes» del panel de
   notificaciones: apps (abrir, detener, borrar caché o datos, desinstalar), idioma, letra,
   animaciones y almacenamiento.
-- **Interfaz de Android compacta:** la app de Configuración, el centro de control, el panel de
-  notificaciones y el de volumen vienen con letra, filas, botones y encabezados más chicos, para que
-  quepan en una ventana de laptop.
+- **Sin barras de Android:** ni la de estado ni la de navegación; las apps usan toda la imagen y los
+  botones de Atrás, Inicio y Recientes están en la barra de ZYKRO.
 - **Android más ligero:** ZYKRO quita las apps que no sirven en un emulador (protectores de pantalla,
   fondos animados, impresión, copias de seguridad, perfiles de empresa, NFC, MMS, calendario y lo que
   Google Play instala solo, como SafetyCore). Así corren unos 160 MB menos en segundo plano. Llamadas,
@@ -62,7 +68,7 @@ como la de BlueStacks.
   y la búsqueda BLE de Android para evitar que el servicio falle al arrancar sin su interfaz HCI;
   el Bluetooth de Linux y los mandos conectados a la laptop siguen funcionando.
   La lista está en `SOBRANTES` (`zykro/src/android.rs`); para devolver una app, sácala de
-  ahí y corre `docker exec redroid-redroid-1 cmd package install-existing <paquete>`.
+  ahí y corre `docker exec zykro-android cmd package install-existing <paquete>`.
 - **Panel de notificaciones propio**, compacto como el de Android 4 y con el tema de ZYKRO: se baja
   arrastrando desde el borde de arriba de la imagen (Android no muestra barra de estado, como en
   BlueStacks), la cubre entera y se sube arrastrándolo hacia arriba (o con Atrás o Esc).
@@ -84,7 +90,7 @@ como la de BlueStacks.
 - Un kernel con binder (`CONFIG_ANDROID_BINDERFS`), como el de CachyOS.
 - Docker, con tu usuario en los grupos `docker` e `input`.
 - Rust (`cargo`) y `gcc` para compilar.
-- Unos 12 GB libres para la imagen de Android.
+- Unos 4 GB libres para la imagen de Android y tus apps.
 - Probado con una GPU Intel (Iris Xe). Con el driver propietario de NVIDIA, ZYKRO todavía no puede
   mostrar la imagen.
 
@@ -100,13 +106,13 @@ Compila ZYKRO, lo copia a `~/.local/bin`, crea su ícono en el menú y prepara A
 1. Activa Docker si no está corriendo.
 2. Monta los dispositivos `binder` en cada arranque (servicio `zykro-binderfs`).
 3. Carga `uinput` en cada arranque.
-4. Descarga la imagen de Android (`geanswag/swagplayer:13.0.0`, unos 6 GB; trae el servidor de video y
-   control que usa ZYKRO) y construye la de ZYKRO (Houdini parcheado e interfaz compacta).
-5. Crea el contenedor de Android.
+4. Descarga Android 9 de redroid (unos 740 MB) y arma la imagen de ZYKRO con `imagen/construir.sh`:
+   baja una vez Houdini de Android-x86 y OpenGApps pico (unos 180 MB, verificados con su SHA-256) y
+   les suma el servidor de ZYKRO.
 
-Pide tu contraseña solo para los pasos 1 a 3, y cada paso se salta si ya está hecho, así que puedes
-volver a correrlo después de actualizar el repositorio. No hace falta tener SwagPlayer instalado.
-Con `--sin-android` solo instala ZYKRO.
+El contenedor lo crea ZYKRO la primera vez que lo abres. Pide tu contraseña solo para los pasos 1 a 3,
+y cada paso se salta si ya está hecho, así que puedes volver a correrlo después de actualizar el
+repositorio. Con `--sin-android` solo instala ZYKRO.
 
 Para copiar también nuestro mapeo de Free Fire (reemplaza el que tengas):
 
@@ -120,14 +126,26 @@ Para copiar también nuestro mapeo de Free Fire (reemplaza el que tengas):
 | --- | --- |
 | `zykro/` | El código de ZYKRO (Rust, eframe/egui). |
 | `launcher/` | La pantalla de inicio de Android (Java, sin Gradle). `launcher/construir.sh` la compila con el SDK de Android; el APK ya compilado viene incluido y ZYKRO lo instala solo en Android. |
-| `preparar-android.sh` | Deja listo Android: Docker, binder, uinput, la imagen y el contenedor. |
+| `servidor/` | El servidor de ZYKRO dentro de Android (Java, corre con `app_process`): la pantalla como DMA-BUF, sin comprimir ni copiar; los toques y teclas; el sonido en un anillo de memoria compartida; la app al frente y si un juego abrió su cuadro de texto. `servidor/construir.sh` lo compila con el SDK de Android; el `.jar` viene incluido. |
+| `imagen/` | Arma la imagen de Android de ZYKRO (`imagen/construir.sh`): redroid 9 con Houdini, Google Play, el servidor y la superposición del marco. Si la imagen cambia, ZYKRO recrea el contenedor con ella al abrirse (mismos datos). |
+| `preparar-android.sh` | Deja listo Android: Docker, binder, uinput y la imagen. |
 | `bin/teclado-android`, `src/teclado-fisico.c` | Crean un teclado "físico" vacío dentro de Android para que no muestre su teclado en pantalla; ZYKRO lo usa al arrancar. |
-| `houdini/` | Construye la imagen de Android de ZYKRO (`houdini/construir.sh`): un parche de 6 bytes en `libhoudini.so` y las superposiciones. Si la imagen cambia, ZYKRO recrea el contenedor con ella al abrirse (mismos datos). |
-| `superposiciones/` | Superposiciones de recursos que hacen compacta la interfaz de Android: `configuracion/` (la app de Configuración) y `sistema/` (centro de control y notificaciones). `superposiciones/construir.sh` las compila; los APK vienen incluidos. |
+| `superposiciones/` | Superposición de recursos del marco de Android (`marco/`): sin barra de estado ni de navegación. `superposiciones/construir.sh` la compila; el APK viene incluido. |
 | `config/keymap/` | Nuestro mapeo de teclas para Free Fire. |
 | `desktop/` | Acceso directo e ícono de ZYKRO. |
 
-No se incluye ningún binario de SwagPlayer, BlueStacks ni la `libhoudini.so` de Intel.
+No se incluye ningún binario de Houdini (Intel), Google ni BlueStacks: `imagen/construir.sh` baja Houdini
+y Google Play de sus fuentes públicas.
+
+## Si venías de la versión con SwagPlayer
+
+ZYKRO ya no usa nada de SwagPlayer. Tu Android anterior (el contenedor `redroid-redroid-1`, con sus
+apps y datos en el volumen `redroid_redroid_data`) queda intacto, pero apartado: el nuevo empieza de
+cero en el volumen `zykro-android-datos`. Cuando ya no lo necesites, esto lo borra y libera unos 9 GB:
+
+```bash
+docker rm redroid-redroid-1 && docker volume rm redroid_redroid_data && docker rmi swagplayer-local:13.0.0-houdini geanswag/swagplayer:13.0.0
+```
 
 ## Licencia
 
@@ -135,5 +153,5 @@ ZYKRO es software libre con licencia [MIT](LICENSE): puedes usarlo, copiarlo, mo
 repartirlo como quieras, también dentro de otros proyectos, siempre que conserves el aviso de copyright
 y la licencia. Se entrega tal cual, sin garantías.
 
-La licencia cubre el código de este repositorio. SwagPlayer, Android, BlueStacks y Free Fire son de
-sus respectivos dueños.
+La licencia cubre el código de este repositorio. Android, Google Play, Houdini, BlueStacks y Free Fire
+son de sus respectivos dueños.

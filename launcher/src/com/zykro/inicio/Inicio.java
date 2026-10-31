@@ -694,12 +694,19 @@ public class Inicio extends Activity implements TextWatcher {
         return d;
     }
 
-    /** Sin barra de estado ni de navegación, como BlueStacks. */
+    /** Sin barra de estado ni de navegación, como BlueStacks (en la imagen de ZYKRO ya no las hay). */
+    @SuppressWarnings("deprecation")
     private void pantallaCompleta() {
         Window ventana = getWindow();
-        ventana.setDecorFitsSystemWindows(false);
         ventana.setStatusBarColor(Color.TRANSPARENT);
         ventana.setNavigationBarColor(Color.TRANSPARENT);
+        if (Build.VERSION.SDK_INT < 30) {
+            ventana.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+            return;
+        }
+        ventana.setDecorFitsSystemWindows(false);
         WindowInsetsController barras = ventana.getInsetsController();
         if (barras != null) {
             barras.hide(WindowInsets.Type.systemBars());

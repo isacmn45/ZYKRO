@@ -448,16 +448,6 @@ impl Ajustes {
             });
             nota(ui, "En una laptop con dos GPU, la dedicada da más FPS y la integrada gasta menos batería. Se aplica reiniciando Android.");
         }
-
-        ui.add_space(4.0);
-        titulo(ui, "Texturas");
-        ui.checkbox(&mut a.lod_activado, "Suavizar texturas");
-        ui.add_enabled_ui(a.lod_activado, |ui| {
-            fila(ui, "Intensidad", |ui| {
-                ui.add(egui::Slider::new(&mut a.lod, 0.0..=4.0).step_by(0.25).fixed_decimals(2));
-            });
-        });
-        nota(ui, "Las texturas (sobre todo las lejanas) se ven un poco más suaves y la GPU trabaja menos: más FPS en juegos pesados. 0.5 es un buen punto medio.");
     }
 
     fn juegos(&mut self, ui: &mut egui::Ui) {

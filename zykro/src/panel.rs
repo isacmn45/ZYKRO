@@ -344,7 +344,11 @@ impl Panel {
                 if resp.clicked() {
                     match i {
                         0 => self.aplicar(ctx, format!("cmd connectivity airplane-mode {}", if d.avion { "disable" } else { "enable" })),
-                        1 => self.aplicar(ctx, format!("cmd notification set_dnd {}", if d.no_molestar { "off" } else { "on" })),
+                        // Android 9 no tiene orden para esto: lo pide la pantalla de inicio de ZYKRO.
+                        1 => self.aplicar(
+                            ctx,
+                            format!("am broadcast -n com.zykro.inicio/.Acciones -a com.zykro.inicio.NO_MOLESTAR --ez activo {}", !d.no_molestar),
+                        ),
                         2 => self.aplicar(ctx, format!("settings put system accelerometer_rotation {}", (!d.girar) as u8)),
                         3 => accion = Some(Accion::Captura),
                         4 => accion = Some(Accion::AjustesAndroid),
@@ -377,7 +381,7 @@ impl Panel {
             p.text(Pos2::new(x1 - 14.0, fila.center().y), Align2::RIGHT_CENTER, porcentaje, FontId::proportional(12.0), TENUE);
             if resp.drag_stopped() || resp.clicked() {
                 if let Some(v) = self.volumen.take() {
-                    self.aplicar(ctx, format!("cmd media_session volume --stream 3 --set {}", v.round() as u32));
+                    self.aplicar(ctx, format!("media volume --stream 3 --set {}", v.round() as u32));
                 }
             }
             y += 44.0 + 16.0;
@@ -709,7 +713,7 @@ fn leer() -> (Datos, Vec<(String, ColorImage)>) {
     let mut d = Datos::default();
     let estado = android::shell(
         "settings get global airplane_mode_on; settings get global zen_mode; settings get system accelerometer_rotation; \
-         settings get system time_12_24; cmd media_session volume --stream 3 --get 2>/dev/null | tail -1",
+         settings get system time_12_24; media volume --stream 3 --get 2>/dev/null | tail -1",
     )
     .unwrap_or_default();
     let campos: Vec<&str> = estado.lines().map(str::trim).collect();

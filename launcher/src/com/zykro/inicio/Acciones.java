@@ -8,7 +8,7 @@ import java.io.FileInputStream;
 
 /**
  * Lo que ZYKRO pide (con `am broadcast` desde la shell de Android): abrir una notificación, tocar
- * uno de sus botones, quitarla o quitar todas, y cambiar el fondo de pantalla. Solo se aceptan
+ * uno de sus botones, quitarla o quitar todas, «No molestar» y cambiar el fondo de pantalla. Solo se aceptan
  * órdenes de la shell o del sistema (permiso DUMP, ver AndroidManifest.xml).
  */
 public class Acciones extends BroadcastReceiver {
@@ -16,6 +16,8 @@ public class Acciones extends BroadcastReceiver {
     static final String ACCION = "com.zykro.inicio.ACCION";
     static final String DESCARTAR = "com.zykro.inicio.DESCARTAR";
     static final String BORRAR_TODO = "com.zykro.inicio.BORRAR_TODO";
+    /** Con `activo` (booleano), enciende o apaga «No molestar». */
+    static final String NO_MOLESTAR = "com.zykro.inicio.NO_MOLESTAR";
     /** Con `archivo` (una imagen que ZYKRO dejó en la carpeta de esta app), la pone de fondo; sin él, vuelve al de siempre. */
     static final String FONDO = "com.zykro.inicio.FONDO";
 
@@ -43,6 +45,9 @@ public class Acciones extends BroadcastReceiver {
                 break;
             case BORRAR_TODO:
                 escucha.borrarTodo();
+                break;
+            case NO_MOLESTAR:
+                escucha.noMolestar(intent.getBooleanExtra("activo", false));
                 break;
             default:
                 break;

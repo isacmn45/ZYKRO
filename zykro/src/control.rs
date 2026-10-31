@@ -1,7 +1,6 @@
-//! Canal de control: mensajes que el cliente manda a swag-rust-server por `control.sock`.
-//! Tecla (0x00) y toque (0x02) son los de scrcpy; 0x12 y 0x14 son propios. El scroll (0x03) no se
-//! usa: Android no lo aplica, y rueda.rs lo imita con un dedo.
-//! Formato completo en docs/investigacion.md.
+//! Canal de control: mensajes que ZYKRO manda a su servidor en Android por `control.sock`.
+//! Tecla (0x00) y toque (0x02) son los de scrcpy. Formato completo en
+//! servidor/src/com/zykro/servidor/Control.java.
 
 use std::io::{self, Write};
 use std::os::unix::net::UnixStream;
@@ -22,16 +21,8 @@ pub struct Control {
 }
 
 impl Control {
-    pub fn conectar(ruta: &str, lod_activado: bool, lod: f32) -> io::Result<Control> {
+    pub fn conectar(ruta: &str) -> io::Result<Control> {
         let mut socket = UnixStream::connect(ruta)?;
-        let layout = b"keyboard_layout_english_us";
-        let mut inicio = vec![0x12, layout.len() as u8];
-        inicio.extend_from_slice(layout);
-        // 0x14: LOD bias activado y su valor.
-        inicio.push(0x14);
-        inicio.push(lod_activado as u8);
-        inicio.extend_from_slice(&lod.clamp(0.0, 4.0).to_be_bytes());
-        socket.write_all(&inicio)?;
 
         // Un hilo escribe para que la interfaz nunca se bloquee esperando al socket.
         let (tx, rx) = channel::<Vec<u8>>();
