@@ -14,6 +14,9 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Canvas;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
@@ -21,6 +24,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
@@ -522,7 +526,8 @@ public class Inicio extends Activity implements TextWatcher {
         GridLayout cuadro = new GridLayout(this);
         cuadro.setColumnCount(2);
         cuadro.setPadding(px(4), px(4), px(4), px(4));
-        cuadro.setBackground(redondeado(CONTROL, lado * Iconos.REDONDEO));
+        cuadro.setBackground(acrilico(lado * Iconos.REDONDEO));
+        cuadro.setClipToOutline(true);
         for (int i = 0; i < Math.min(4, dentro.size()); i++) {
             ImageView mini = new ImageView(this);
             mini.setImageBitmap(dentro.get(i).icono);
@@ -542,20 +547,60 @@ public class Inicio extends Activity implements TextWatcher {
     private void abrirCarpeta(String nombre, List<App> dentro) {
         cerrarCarpeta();
         FrameLayout velo = new FrameLayout(this);
-        velo.setBackgroundColor(0xB3000000);
+        if (Build.VERSION.SDK_INT >= 31 && raiz.isHardwareAccelerated() && raiz.getWidth() > 0 && raiz.getHeight() > 0) {
+            Bitmap fondoCarpeta = Bitmap.createBitmap(Math.max(1, raiz.getWidth() / 4), Math.max(1, raiz.getHeight() / 4), Bitmap.Config.ARGB_8888);
+            Canvas lienzo = new Canvas(fondoCarpeta);
+            lienzo.scale((float) fondoCarpeta.getWidth() / raiz.getWidth(), (float) fondoCarpeta.getHeight() / raiz.getHeight());
+            raiz.draw(lienzo);
+            ImageView difuminado = new ImageView(this);
+            difuminado.setImageBitmap(fondoCarpeta);
+            difuminado.setScaleType(ImageView.ScaleType.FIT_XY);
+            difuminado.setRenderEffect(RenderEffect.createBlurEffect(px(12), px(12), Shader.TileMode.CLAMP));
+            velo.addView(difuminado, new FrameLayout.LayoutParams(MATCH, MATCH));
+        }
+        View tinte = new View(this);
+        tinte.setBackgroundColor(0x66200F35);
+        velo.addView(tinte, new FrameLayout.LayoutParams(MATCH, MATCH));
         velo.setOnClickListener(vista -> cerrarCarpeta());
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setPadding(px(18), px(14), px(18), px(14));
-        panel.setBackground(redondeado(PANEL, px(14)));
+        panel.setPadding(px(22), px(20), px(22), px(20));
+        panel.setBackground(acrilico(px(22)));
+        panel.setClipToOutline(true);
+        panel.setElevation(px(16));
         panel.setClickable(true); // tocar el panel no lo cierra
-        panel.addView(texto(nombre, 14, TEXTO, true));
+        LinearLayout encabezado = new LinearLayout(this);
+        encabezado.setGravity(Gravity.CENTER_VERTICAL);
+        View marca = new View(this);
+        marca.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] {0xFF8DE5EB, ACENTO}));
+        LinearLayout.LayoutParams marcaParams = new LinearLayout.LayoutParams(px(3), px(22));
+        marcaParams.rightMargin = px(12);
+        encabezado.addView(marca, marcaParams);
+        encabezado.addView(texto(nombre, 16, TEXTO, true), new LinearLayout.LayoutParams(0, WRAP, 1));
+        TextView cerrar = texto("×", 22, TEXTO, false);
+        cerrar.setGravity(Gravity.CENTER);
+        cerrar.setContentDescription("Cerrar carpeta");
+        cerrar.setBackground(presionable(px(16)));
+        cerrar.setOnClickListener(vista -> cerrarCarpeta());
+        encabezado.addView(cerrar, new LinearLayout.LayoutParams(px(32), px(32)));
+        panel.addView(encabezado);
+        View separador = new View(this);
+        separador.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, new int[] {0x557FDFE9, 0x44A855F7, 0x00A855F7}));
+        LinearLayout.LayoutParams lineaParams = new LinearLayout.LayoutParams(MATCH, px(1));
+        lineaParams.topMargin = px(12);
+        panel.addView(separador, lineaParams);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
-        lp.topMargin = px(10);
-        panel.addView(mosaico(dentro), lp);
+        lp.topMargin = px(18);
+        ScrollView listado = new ScrollView(this);
+        listado.setFillViewport(false);
+        listado.addView(mosaico(dentro));
+        panel.addView(listado, lp);
 
-        velo.addView(panel, new FrameLayout.LayoutParams(px(420), WRAP, Gravity.CENTER));
+        int anchoPanel = Math.min(px(420), Math.max(px(100), raiz.getWidth() - px(40)));
+        int altoMaximo = Math.max(px(100), raiz.getHeight() - px(48));
+        panel.measure(View.MeasureSpec.makeMeasureSpec(anchoPanel, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(altoMaximo, View.MeasureSpec.AT_MOST));
+        velo.addView(panel, new FrameLayout.LayoutParams(anchoPanel, panel.getMeasuredHeight(), Gravity.CENTER));
         raiz.addView(velo, new FrameLayout.LayoutParams(MATCH, MATCH));
         carpetaAbierta = velo;
     }
@@ -622,6 +667,13 @@ public class Inicio extends Activity implements TextWatcher {
         d.setColor(color);
         d.setCornerRadius(radio);
         return d;
+    }
+
+    private GradientDrawable acrilico(float radio) {
+        GradientDrawable superficie = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[] {0xE8473D60, 0xDC292238, 0xEB211D32});
+        superficie.setCornerRadius(radio);
+        superficie.setStroke(Math.max(1, px(0.7f)), 0x557EDDE7);
+        return superficie;
     }
 
     /** Fondo que se ilumina al presionar (el mouse de ZYKRO llega como toque). */
