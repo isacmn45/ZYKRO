@@ -27,11 +27,11 @@ como la de BlueStacks.
 - **Interfaz de Android compacta:** la app de Configuración, el centro de control, el panel de
   notificaciones y el de volumen vienen con letra, filas, botones y encabezados más chicos, para que
   quepan en una ventana de laptop.
-- **Panel de notificaciones al estilo de Android 4:** se baja arrastrando desde el borde de arriba de la
-  imagen (Android no muestra barra de estado, como en BlueStacks). Oscuro y compacto: interruptores
-  (avión, no molestar, girar, captura, ajustes), volumen y la lista de notificaciones, que se abren,
-  se quitan o se borran todas. El panel moderno de Android sigue a un toque, para la música o
-  responder mensajes.
+- **Panel de notificaciones propio**, compacto como el de Android 4 y con el tema de ZYKRO: se baja
+  arrastrando desde el borde de arriba de la imagen (Android no muestra barra de estado, como en
+  BlueStacks) y la cubre entera. Interruptores (avión, no molestar, girar, captura, ajustes), volumen y
+  las notificaciones en tarjetas, que se abren, se quitan o se borran todas. El panel moderno de
+  Android sigue a un toque, para la música o responder mensajes.
 - **Extras:** selector de apps abiertas, capturas de pantalla, scroll con la rueda o el touchpad y
   temperatura de la CPU y la GPU en la barra de título.
 

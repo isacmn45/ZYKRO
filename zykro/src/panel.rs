@@ -1,6 +1,7 @@
-//! Panel de notificaciones al estilo de Android 4 (KitKat): oscuro y compacto, con una fila de
-//! interruptores con su nombre, el volumen y la lista de notificaciones. Lo dibuja ZYKRO en vez del
-//! de Android, que gasta mucho espacio; se baja arrastrando desde el borde de arriba de la imagen.
+//! Panel de notificaciones de ZYKRO, compacto como el de Android 4 (KitKat) y con el tema de ZYKRO:
+//! una fila de interruptores con su nombre, el volumen y las notificaciones en tarjetas, cubriendo toda
+//! la imagen. Lo dibuja ZYKRO en vez del de Android, que gasta mucho espacio; se baja arrastrando
+//! desde el borde de arriba de la imagen.
 //! Las notificaciones las exporta la pantalla de inicio de ZYKRO (`Escucha.java`), y ZYKRO le pide
 //! abrirlas o quitarlas con `am broadcast` (`Acciones.java`).
 
@@ -18,18 +19,16 @@ use eframe::egui::{
 use egui_phosphor::regular as ic;
 
 use crate::android;
+use crate::{ACENTO, FONDO, FONDO_CONTROL, FONDO_HOVER, FONDO_OSCURO, ICONO, TENUE, TEXTO};
 
 /// Carpeta de Android donde la pantalla de inicio deja las notificaciones y sus íconos.
 const EXPORTADO: &str = "/data/media/0/Android/data/com.zykro.inicio/files";
 
-// Colores de Android 4 (Holo oscuro).
-const FONDO: Color32 = Color32::from_rgb(0x12, 0x12, 0x12);
-const ENCIMA: Color32 = Color32::from_rgb(0x22, 0x22, 0x22);
-const LINEA: Color32 = Color32::from_rgb(0x2b, 0x2b, 0x2b);
-const HOLO: Color32 = Color32::from_rgb(0x33, 0xb5, 0xe5);
-const BLANCO: Color32 = Color32::from_rgb(0xf2, 0xf2, 0xf2);
-const GRIS: Color32 = Color32::from_rgb(0x9e, 0x9e, 0x9e);
-const APAGADO: Color32 = Color32::from_rgb(0xb0, 0xb0, 0xb0);
+/// Separación entre tarjetas y botones, y margen del panel.
+const SEP: f32 = 10.0;
+const MARGEN: f32 = 20.0;
+/// Ancho mínimo de una tarjeta de notificación (con más ancho, van en columnas).
+const ANCHO_TARJETA: f32 = 340.0;
 
 const DIAS: [&str; 7] = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
 const MESES: [&str; 12] = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
@@ -135,7 +134,7 @@ impl Panel {
         thread::spawn(move || android::shell(&orden));
     }
 
-    /// Dibuja el panel sobre `area` (la zona del video).
+    /// Dibuja el panel sobre `area` (la zona del video), cubriéndola entera.
     pub fn mostrar(&mut self, ctx: &egui::Context, area: Rect) -> Option<Accion> {
         if !self.abierto {
             return None;
@@ -143,7 +142,7 @@ impl Panel {
         for (archivo, imagen) in self.iconos_nuevos.lock().unwrap().drain(..) {
             self.texturas.insert(archivo.clone(), ctx.load_texture(format!("notificacion-{archivo}"), imagen, TextureOptions::LINEAR));
         }
-        let t = ctx.animate_bool_with_time_and_easing(Id::new("panel-t"), self.visible, 0.18, easing::cubic_out);
+        let t = ctx.animate_bool_with_time_and_easing(Id::new("panel-t"), self.visible, 0.2, easing::cubic_out);
         if !self.visible && t <= 0.0 {
             self.abierto = false;
             return None;
@@ -152,42 +151,38 @@ impl Panel {
             self.cerrar();
         }
         let datos = self.datos.lock().unwrap().clone();
+        let d = datos.clone().unwrap_or_default();
         let mut accion = None;
-
-        let ancho = (area.width() * 0.42).clamp(380.0, 560.0).min(area.width());
-        let alto = area.height();
-        let panel = Rect::from_min_size(Pos2::new(area.center().x - ancho / 2.0, area.min.y - (1.0 - t) * alto), Vec2::new(ancho, alto));
+        // Baja desde arriba cubriendo toda la imagen.
+        let panel = area.translate(Vec2::new(0.0, -(1.0 - t) * area.height()));
 
         egui::Area::new(Id::new("panel")).order(Order::Foreground).fixed_pos(area.min).show(ctx, |ui| {
-            let p = ui.painter().clone();
-            // Fuera del panel, oscurece y cierra al tocar.
-            p.rect_filled(area, 0.0, Color32::from_black_alpha((110.0 * t) as u8));
-            if ui.allocate_rect(area, Sense::click()).clicked() {
+            let ui = &mut ui.new_child(egui::UiBuilder::new().max_rect(panel));
+            let p = ui.painter_at(area);
+            p.rect_filled(panel, 0.0, FONDO_OSCURO);
+            ui.allocate_rect(panel, Sense::click());
+            let (x0, x1) = (panel.min.x + MARGEN, panel.max.x - MARGEN);
+            let ancho = x1 - x0;
+            let mut y = panel.min.y + 14.0;
+
+            // Hora y fecha; a la derecha, «Borrar todo» y cerrar.
+            let (ahora, dia, mes, num) = ahora();
+            let hora = p.layout_no_wrap(formato_hora(ahora, d.hora24), FontId::proportional(26.0), TEXTO);
+            let alto = 40.0;
+            p.galley(Pos2::new(x0, y + (alto - hora.size().y) / 2.0), hora.clone(), TEXTO);
+            let fecha = format!("{dia}, {num} de {mes}");
+            p.text(Pos2::new(x0 + hora.size().x + 12.0, y + alto / 2.0 + 3.0), Align2::LEFT_CENTER, fecha, FontId::proportional(13.0), TENUE);
+            let cerrar = Rect::from_min_size(Pos2::new(x1 - 34.0, y + 3.0), Vec2::splat(34.0));
+            if boton_icono(ui, &p, cerrar, ic::CARET_UP, "Cerrar") {
                 self.cerrar();
             }
-            let fondo = ui.allocate_rect(panel, Sense::click());
-            p.rect_filled(panel, 0.0, FONDO);
-            let _ = fondo;
-            let ui = &mut ui.new_child(egui::UiBuilder::new().max_rect(panel));
-            let x0 = panel.min.x;
-            let mut y = panel.min.y;
-
-            // Hora y fecha, y a la derecha los ajustes y «borrar todo».
-            let (ahora, dia, mes, num) = ahora();
-            let hora = formato_hora(ahora, datos.as_ref().is_some_and(|d| d.hora24));
-            p.text(Pos2::new(x0 + 14.0, y + 26.0), Align2::LEFT_CENTER, &hora, FontId::proportional(24.0), BLANCO);
-            let ancho_hora = p.layout_no_wrap(hora.clone(), FontId::proportional(24.0), BLANCO).size().x;
-            let fecha = format!("{dia}, {num} de {mes}");
-            p.text(Pos2::new(x0 + 24.0 + ancho_hora, y + 29.0), Align2::LEFT_CENTER, fecha, FontId::proportional(12.5), GRIS);
-            let borrar = Rect::from_center_size(Pos2::new(panel.max.x - 22.0, y + 26.0), Vec2::splat(34.0));
-            if boton_icono(ui, borrar, ic::BROOM, "Borrar todo") {
+            let borrar = Rect::from_min_size(Pos2::new(cerrar.min.x - 8.0 - 130.0, y + 3.0), Vec2::new(130.0, 34.0));
+            if d.notificaciones.iter().any(|n| n.descartable) && boton_texto(ui, &p, borrar, ic::BROOM, "Borrar todo") {
                 Panel::pedir("BORRAR_TODO", None, None);
             }
-            y += 52.0;
-            linea(&p, panel, y);
+            y += alto + 14.0;
 
-            // Interruptores, con su nombre debajo (encendido = celeste).
-            let d = datos.clone().unwrap_or_default();
+            // Interruptores a todo lo ancho (encendido = color de ZYKRO).
             let interruptores: [(&str, &str, Option<bool>); 6] = [
                 (ic::AIRPLANE, "Avión", Some(d.avion)),
                 (ic::MOON, "No molestar", Some(d.no_molestar)),
@@ -196,19 +191,17 @@ impl Panel {
                 (ic::GEAR, "Ajustes", None),
                 (ic::ANDROID_LOGO, "Android", None),
             ];
-            let celda = ancho / interruptores.len() as f32;
+            let n = interruptores.len() as f32;
+            let w = (ancho - SEP * (n - 1.0)) / n;
             for (i, (glifo, nombre, estado)) in interruptores.iter().enumerate() {
-                let r = Rect::from_min_size(Pos2::new(x0 + i as f32 * celda, y), Vec2::new(celda, 62.0));
+                let r = Rect::from_min_size(Pos2::new(x0 + i as f32 * (w + SEP), y), Vec2::new(w, 64.0));
                 let resp = ui.allocate_rect(r, Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-                if resp.hovered() {
-                    p.rect_filled(r, 0.0, ENCIMA);
-                }
-                let color = if estado == &Some(true) { HOLO } else { APAGADO };
-                p.text(Pos2::new(r.center().x, r.min.y + 22.0), Align2::CENTER_CENTER, *glifo, FontId::proportional(21.0), color);
-                p.text(Pos2::new(r.center().x, r.min.y + 46.0), Align2::CENTER_CENTER, *nombre, FontId::proportional(11.0), color);
-                if i > 0 {
-                    p.line_segment([Pos2::new(r.min.x, r.min.y + 14.0), Pos2::new(r.min.x, r.max.y - 14.0)], Stroke::new(1.0, LINEA));
-                }
+                let encendido = estado == &Some(true);
+                let fondo = if encendido { ACENTO } else if resp.hovered() { FONDO_HOVER } else { FONDO_CONTROL };
+                p.rect_filled(r, 12.0, fondo);
+                let color = if encendido { Color32::WHITE } else { ICONO };
+                p.text(Pos2::new(r.center().x, r.min.y + 24.0), Align2::CENTER_CENTER, *glifo, FontId::proportional(20.0), color);
+                p.text(Pos2::new(r.center().x, r.min.y + 47.0), Align2::CENTER_CENTER, *nombre, FontId::proportional(11.5), color);
                 if resp.clicked() {
                     match i {
                         0 => self.aplicar(ctx, format!("cmd connectivity airplane-mode {}", if d.avion { "disable" } else { "enable" })),
@@ -223,48 +216,63 @@ impl Panel {
                     }
                 }
             }
-            y += 62.0;
-            linea(&p, panel, y);
+            y += 64.0 + 12.0;
 
             // Volumen de la música y los juegos (el brillo no hace nada en un emulador).
-            let fila = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(ancho, 40.0));
-            p.text(Pos2::new(x0 + 22.0, fila.center().y), Align2::CENTER_CENTER, ic::SPEAKER_HIGH, FontId::proportional(18.0), APAGADO);
-            let barra = Rect::from_min_max(Pos2::new(x0 + 46.0, fila.center().y - 12.0), Pos2::new(panel.max.x - 18.0, fila.center().y + 12.0));
+            let fila = Rect::from_min_size(Pos2::new(x0, y), Vec2::new(ancho, 44.0));
+            p.rect_filled(fila, 12.0, FONDO);
+            p.text(Pos2::new(x0 + 22.0, fila.center().y), Align2::CENTER_CENTER, ic::SPEAKER_HIGH, FontId::proportional(18.0), ICONO);
+            let barra = Rect::from_min_max(Pos2::new(x0 + 46.0, fila.center().y - 12.0), Pos2::new(x1 - 62.0, fila.center().y + 12.0));
             let resp = ui.allocate_rect(barra, Sense::click_and_drag());
             let maximo = d.volumen_max.max(1) as f32;
             if let Some(pos) = resp.interact_pointer_pos().filter(|_| resp.dragged() || resp.clicked() || resp.drag_started()) {
                 self.volumen = Some(((pos.x - barra.min.x) / barra.width()).clamp(0.0, 1.0) * maximo);
             }
             let valor = self.volumen.unwrap_or(d.volumen as f32) / maximo;
-            let pista = Rect::from_center_size(barra.center(), Vec2::new(barra.width(), 3.0));
-            p.rect_filled(pista, 1.5, LINEA);
-            p.rect_filled(Rect::from_min_size(pista.min, Vec2::new(pista.width() * valor, 3.0)), 1.5, HOLO);
-            p.circle_filled(Pos2::new(pista.min.x + pista.width() * valor, pista.center().y), 7.0, HOLO);
+            let pista = Rect::from_center_size(barra.center(), Vec2::new(barra.width(), 4.0));
+            p.rect_filled(pista, 2.0, FONDO_HOVER);
+            p.rect_filled(Rect::from_min_size(pista.min, Vec2::new(pista.width() * valor, 4.0)), 2.0, ACENTO);
+            let pulgar = Pos2::new(pista.min.x + pista.width() * valor, pista.center().y);
+            p.circle(pulgar, 7.0, Color32::WHITE, Stroke::new(2.0, ACENTO));
+            let porcentaje = format!("{:.0} %", valor * 100.0);
+            p.text(Pos2::new(x1 - 14.0, fila.center().y), Align2::RIGHT_CENTER, porcentaje, FontId::proportional(12.0), TENUE);
             if resp.drag_stopped() || resp.clicked() {
                 if let Some(v) = self.volumen.take() {
                     self.aplicar(ctx, format!("cmd media_session volume --stream 3 --set {}", v.round() as u32));
                 }
             }
-            y += 40.0;
-            linea(&p, panel, y);
+            y += 44.0 + 16.0;
 
-            // Notificaciones.
-            let lista = Rect::from_min_max(Pos2::new(x0, y + 1.0), Pos2::new(panel.max.x, panel.max.y - 16.0));
+            // Notificaciones en tarjetas; con ancho, en columnas.
+            let titulo = match d.notificaciones.len() {
+                0 => "Notificaciones".to_string(),
+                n => format!("Notificaciones · {n}"),
+            };
+            p.text(Pos2::new(x0 + 2.0, y + 8.0), Align2::LEFT_CENTER, titulo, FontId::proportional(12.5), TENUE);
+            y += 24.0;
+            let lista = Rect::from_min_max(Pos2::new(x0, y), Pos2::new(x1, panel.max.y - 22.0));
             match &datos {
                 None => {
-                    p.text(lista.center_top() + Vec2::new(0.0, 40.0), Align2::CENTER_CENTER, "…", FontId::proportional(14.0), GRIS);
+                    p.text(lista.center_top() + Vec2::new(0.0, 50.0), Align2::CENTER_CENTER, "…", FontId::proportional(16.0), TENUE);
                 }
                 Some(d) if d.notificaciones.is_empty() => {
-                    let centro = lista.center_top() + Vec2::new(0.0, 40.0);
-                    p.text(centro, Align2::CENTER_CENTER, "Sin notificaciones", FontId::proportional(13.0), GRIS);
+                    let centro = lista.center_top() + Vec2::new(0.0, 60.0);
+                    p.text(centro, Align2::CENTER_CENTER, ic::BELL_SLASH, FontId::proportional(30.0), FONDO_HOVER);
+                    p.text(centro + Vec2::new(0.0, 32.0), Align2::CENTER_CENTER, "No hay notificaciones", FontId::proportional(13.0), TENUE);
                 }
                 Some(d) => {
+                    let columnas = ((ancho + SEP) / (ANCHO_TARJETA + SEP)).floor().clamp(1.0, 3.0) as usize;
+                    let w = (ancho - SEP * (columnas as f32 - 1.0)) / columnas as f32;
                     let mut hijo = ui.new_child(egui::UiBuilder::new().max_rect(lista));
                     egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(lista.height()).show(&mut hijo, |ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
-                        for n in &d.notificaciones {
-                            if let Some(abrir) = self.fila(ui, n, d.hora24) {
-                                if abrir {
+                        for fila in d.notificaciones.chunks(columnas) {
+                            let medidas: Vec<Medida> = fila.iter().map(|n| medir(ui, n, w)).collect();
+                            let alto = medidas.iter().map(|m| m.alto).fold(0.0, f32::max);
+                            let (r, _) = ui.allocate_exact_size(Vec2::new(ancho, alto + SEP), Sense::hover());
+                            for (j, (n, m)) in fila.iter().zip(medidas).enumerate() {
+                                let tarjeta = Rect::from_min_size(Pos2::new(r.min.x + j as f32 * (w + SEP), r.min.y), Vec2::new(w, alto));
+                                if self.tarjeta(ui, tarjeta, n, m, d.hora24) {
                                     self.cerrar();
                                 }
                             }
@@ -274,8 +282,8 @@ impl Panel {
             }
 
             // Asa de abajo: tocarla sube el panel.
-            let asa = Rect::from_min_max(Pos2::new(x0, panel.max.y - 16.0), panel.max);
-            p.rect_filled(Rect::from_center_size(asa.center(), Vec2::new(36.0, 3.0)), 1.5, GRIS);
+            let asa = Rect::from_min_max(Pos2::new(panel.min.x, panel.max.y - 22.0), panel.max);
+            p.rect_filled(Rect::from_center_size(asa.center(), Vec2::new(44.0, 4.0)), 2.0, FONDO_HOVER);
             if ui.allocate_rect(asa, Sense::click()).clicked() {
                 self.cerrar();
             }
@@ -283,65 +291,68 @@ impl Panel {
         accion
     }
 
-    /// Una notificación. Devuelve `Some(true)` si se abrió (el panel se cierra).
-    fn fila(&mut self, ui: &mut egui::Ui, n: &Notificacion, hora24: bool) -> Option<bool> {
-        let ancho = ui.available_width();
-        let texto_x = 58.0;
-        let ancho_texto = ancho - texto_x - 14.0;
-        let titulo = galeria(ui, &n.titulo, 13.5, BLANCO, ancho_texto - 70.0, 1);
-        let texto = galeria(ui, &n.texto, 12.0, GRIS, ancho_texto, 2);
-        let con_acciones = !n.acciones.is_empty();
-        let alto = (12.0 + titulo.size().y + 2.0 + texto.size().y + if con_acciones { 32.0 } else { 0.0 } + 12.0).max(60.0);
-        let (r, resp) = ui.allocate_exact_size(Vec2::new(ancho, alto), Sense::click());
+    /// Una notificación en su tarjeta. Devuelve si se abrió (el panel se cierra).
+    fn tarjeta(&mut self, ui: &mut egui::Ui, r: Rect, n: &Notificacion, m: Medida, hora24: bool) -> bool {
+        let resp = ui.allocate_rect(r, Sense::click());
         let p = ui.painter().clone();
-        if resp.hovered() {
-            p.rect_filled(r, 0.0, ENCIMA);
-        }
+        let encima = ui.rect_contains_pointer(r);
+        p.rect_filled(r, 12.0, if encima { FONDO_CONTROL } else { FONDO });
         if let Some(t) = self.texturas.get(&n.icono) {
-            let icono = Rect::from_min_size(r.min + Vec2::new(12.0, 12.0), Vec2::splat(36.0));
-            egui::Image::from_texture(t).corner_radius(4.0).paint_at(ui, icono);
+            egui::Image::from_texture(t).corner_radius(8.0).paint_at(ui, Rect::from_min_size(r.min + Vec2::new(14.0, 12.0), Vec2::splat(36.0)));
         }
+        let texto_x = r.min.x + 62.0;
         let arriba = r.min.y + 12.0;
-        p.galley(Pos2::new(r.min.x + texto_x, arriba), titulo.clone(), BLANCO);
-        p.galley(Pos2::new(r.min.x + texto_x, arriba + titulo.size().y + 2.0), texto.clone(), GRIS);
-        // Hora y app a la derecha; con el mouse encima, la X para quitarla.
-        let detalle = format!("{} · {}", n.app, formato_hora(n.hora, hora24));
-        let x_der = Rect::from_center_size(Pos2::new(r.max.x - 18.0, arriba + 8.0), Vec2::splat(26.0));
-        let mut resultado = None;
-        if n.descartable && resp.hovered() {
-            if boton_icono(ui, x_der, ic::X, "Quitar") {
+        p.galley(Pos2::new(texto_x, arriba), m.titulo.clone(), TEXTO);
+        p.galley(Pos2::new(texto_x, arriba + m.titulo.size().y + 3.0), m.texto, TENUE);
+        let mut abierta = false;
+        // App y hora a la derecha; con el mouse encima, la X para quitarla.
+        if n.descartable && encima {
+            let x = Rect::from_center_size(Pos2::new(r.max.x - 20.0, arriba + 9.0), Vec2::splat(28.0));
+            if boton_icono(ui, &p, x, ic::X, "Quitar") {
                 Panel::pedir("DESCARTAR", Some(&n.clave), None);
-                resultado = Some(false);
+                return false;
             }
         } else {
-            let detalle = galeria(ui, &detalle, 11.0, GRIS, 150.0, 1);
-            p.galley(Pos2::new(r.max.x - 12.0 - detalle.size().x, arriba + 1.0), detalle, GRIS);
+            let detalle = galeria(ui, &format!("{} · {}", n.app, formato_hora(n.hora, hora24)), 11.0, TENUE, 150.0, 1);
+            p.galley(Pos2::new(r.max.x - 14.0 - detalle.size().x, arriba + 1.0), detalle, TENUE);
         }
-        if con_acciones {
-            let y = r.max.y - 34.0;
-            let mut x = r.min.x + texto_x;
+        if !n.acciones.is_empty() {
+            let mut x = texto_x;
             for (i, nombre) in n.acciones.iter().enumerate().take(3) {
-                let etiqueta = galeria(ui, &nombre.to_uppercase(), 11.5, BLANCO, 140.0, 1);
-                let boton = Rect::from_min_size(Pos2::new(x - 8.0, y), Vec2::new(etiqueta.size().x + 16.0, 28.0));
+                let etiqueta = galeria(ui, nombre, 12.0, ACENTO, 140.0, 1);
+                let boton = Rect::from_min_size(Pos2::new(x, r.max.y - 12.0 - 28.0), Vec2::new(etiqueta.size().x + 24.0, 28.0));
                 let b = ui.allocate_rect(boton, Sense::click());
-                if b.hovered() {
-                    ui.painter().rect_filled(boton, 2.0, LINEA);
-                }
-                ui.painter().galley(Pos2::new(x, boton.center().y - etiqueta.size().y / 2.0), etiqueta, BLANCO);
+                p.rect_filled(boton, 14.0, if b.hovered() { FONDO_HOVER } else { FONDO_OSCURO });
+                p.galley(boton.center() - etiqueta.size() / 2.0, etiqueta, ACENTO);
                 if b.clicked() {
                     Panel::pedir("ACCION", Some(&n.clave), Some(i));
-                    resultado = Some(true);
+                    abierta = true;
                 }
-                x = boton.max.x + 12.0;
+                x = boton.max.x + 8.0;
             }
         }
-        p.line_segment([Pos2::new(r.min.x + texto_x, r.max.y - 0.5), Pos2::new(r.max.x, r.max.y - 0.5)], Stroke::new(1.0, LINEA));
-        if resultado.is_none() && resp.clicked() {
+        if !abierta && resp.clicked() {
             Panel::pedir("ABRIR", Some(&n.clave), None);
-            resultado = Some(true);
+            abierta = true;
         }
-        resultado
+        abierta
     }
+}
+
+/// Textos de una tarjeta ya acomodados, y su alto.
+struct Medida {
+    titulo: Arc<egui::Galley>,
+    texto: Arc<egui::Galley>,
+    alto: f32,
+}
+
+fn medir(ui: &egui::Ui, n: &Notificacion, ancho: f32) -> Medida {
+    let ancho_texto = ancho - 62.0 - 14.0;
+    let titulo = galeria(ui, &n.titulo, 13.5, TEXTO, ancho_texto - 90.0, 1);
+    let texto = galeria(ui, &n.texto, 12.0, TENUE, ancho_texto, 3);
+    let acciones = if n.acciones.is_empty() { 0.0 } else { 38.0 };
+    let alto = (12.0 + titulo.size().y + 3.0 + texto.size().y + acciones + 12.0).max(60.0);
+    Medida { titulo, texto, alto }
 }
 
 fn galeria(ui: &egui::Ui, texto: &str, tam: f32, color: Color32, ancho: f32, filas: usize) -> Arc<egui::Galley> {
@@ -350,17 +361,20 @@ fn galeria(ui: &egui::Ui, texto: &str, tam: f32, color: Color32, ancho: f32, fil
     ui.painter().layout_job(trabajo)
 }
 
-fn boton_icono(ui: &mut egui::Ui, r: Rect, glifo: &str, ayuda: &str) -> bool {
+fn boton_icono(ui: &mut egui::Ui, p: &egui::Painter, r: Rect, glifo: &str, ayuda: &str) -> bool {
     let resp = ui.allocate_rect(r, Sense::click()).on_hover_text(ayuda);
     if resp.hovered() {
-        ui.painter().circle_filled(r.center(), r.width() / 2.0, LINEA);
+        p.circle_filled(r.center(), r.width() / 2.0, FONDO_HOVER);
     }
-    ui.painter().text(r.center(), Align2::CENTER_CENTER, glifo, FontId::proportional(17.0), APAGADO);
+    p.text(r.center(), Align2::CENTER_CENTER, glifo, FontId::proportional(17.0), ICONO);
     resp.clicked()
 }
 
-fn linea(p: &egui::Painter, panel: Rect, y: f32) {
-    p.line_segment([Pos2::new(panel.min.x, y), Pos2::new(panel.max.x, y)], Stroke::new(1.0, LINEA));
+fn boton_texto(ui: &mut egui::Ui, p: &egui::Painter, r: Rect, glifo: &str, texto: &str) -> bool {
+    let resp = ui.allocate_rect(r, Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    p.rect_filled(r, 17.0, if resp.hovered() { FONDO_HOVER } else { FONDO_CONTROL });
+    p.text(r.center(), Align2::CENTER_CENTER, format!("{glifo}  {texto}"), FontId::proportional(13.0), TEXTO);
+    resp.clicked()
 }
 
 /// Ahora (ms) y el día de la semana, el mes y el día del mes.
