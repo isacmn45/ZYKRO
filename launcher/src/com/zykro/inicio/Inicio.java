@@ -85,9 +85,6 @@ public class Inicio extends Activity implements TextWatcher {
     /** Etiqueta del registro de Android que lee ZYKRO. */
     private static final String ETIQUETA = "ZYKRO";
 
-    /** Tiendas de apps, en orden de preferencia, para el botón de arriba. */
-    private static final String[] TIENDAS = {"com.android.vending", "com.aurora.store"};
-
     /** La que está abierta, para que {@link Fondo} le avise que cambió el fondo. */
     static volatile Inicio activa;
 
@@ -111,8 +108,6 @@ public class Inicio extends Activity implements TextWatcher {
     private ScrollView desplazable;
     private LinearLayout contenido;
     private EditText buscador;
-    private ImageView botonTienda;
-    private App tienda;
     private View carpetaAbierta;
     private BroadcastReceiver cambios;
 
@@ -351,7 +346,6 @@ public class Inicio extends Activity implements TextWatcher {
     /** Arma el contenido: los resultados de la búsqueda, o tus apps y la carpeta del sistema. */
     private void mostrar() {
         contenido.removeAllViews();
-        actualizarTienda();
         String buscado = buscador.getText().toString().trim();
         if (!buscado.isEmpty()) {
             String clave = buscado.toLowerCase(Locale.ROOT);
@@ -429,23 +423,6 @@ public class Inicio extends Activity implements TextWatcher {
         menu.show();
     }
 
-    /** El botón de la tienda muestra la primera que esté instalada (Play Store o Aurora). */
-    private void actualizarTienda() {
-        tienda = null;
-        for (String paquete : TIENDAS) {
-            for (App a : apps) {
-                if (tienda == null && a.paquete.equals(paquete)) {
-                    tienda = a;
-                }
-            }
-        }
-        botonTienda.setVisibility(tienda == null ? View.GONE : View.VISIBLE);
-        if (tienda != null) {
-            botonTienda.setImageBitmap(tienda.icono);
-            botonTienda.setContentDescription(tienda.nombre);
-        }
-    }
-
     // -----------------------------------------------------------------------------------------
     // Vistas
     // -----------------------------------------------------------------------------------------
@@ -480,14 +457,6 @@ public class Inicio extends Activity implements TextWatcher {
         barra.addView(caja, new LinearLayout.LayoutParams(px(320), px(34)));
 
         barra.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-
-        botonTienda = botonIcono(null, vista -> {
-            if (tienda != null) {
-                abrirApp(tienda);
-            }
-        });
-        botonTienda.setPadding(px(4), px(4), px(4), px(4));
-        barra.addView(botonTienda);
 
         TextClock reloj = new TextClock(this);
         reloj.setFormat24Hour("HH:mm");
