@@ -11,6 +11,7 @@ COPY --from=redroid/redroid:9.0.0-latest /vendor/build.prop /tmp/vendor.prop
 COPY --from=redroid/redroid:9.0.0-latest /system/etc/ld.config.28.txt /tmp/ld.config.28.txt
 COPY --from=redroid/redroid:9.0.0-latest /system/lib64/libbinder.so /tmp/libbinder64.so
 COPY --from=redroid/redroid:9.0.0-latest /system/lib/libbinder.so /tmp/libbinder32.so
+COPY --from=redroid/redroid:9.0.0-latest /system/framework/oat/x86_64/services.odex /tmp/services.odex
 COPY descargas/houdini.sfs descargas/gapps.zip armar.sh /tmp/
 RUN sh /tmp/armar.sh
 

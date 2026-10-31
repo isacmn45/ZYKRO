@@ -31,6 +31,15 @@ cp /tmp/libbinder32.so "$S/lib/libbinder.so"
 parchear "$S/lib64/libbinder.so" $((0x4ea65)) 46 03 # jb +0x46 (aborto) -> jb +3 (sin restar)
 parchear "$S/lib/libbinder.so" $((0x4a124)) 3d 02   # jb +0x3d (aborto) -> jb +2 (sin restar)
 
+# services.odex (system_server): sin los módulos de red de los kernels de Android (xt_qtaguid,
+# xt_quota2), el servicio de políticas de red no termina de arrancar y deja vacío su acceso a App
+# Standby. Así toma a todas las apps por inactivas y les corta la red cuando no están al frente:
+# Google Play Services no podía iniciar sesión («No tienes una conexión de red»). En
+# NetworkPolicyManagerService.isUidIdle, ese caso pasa a responder «no está inactiva».
+mkdir -p "$S/framework/oat/x86_64"
+cp /tmp/services.odex "$S/framework/oat/x86_64/services.odex"
+parchear "$S/framework/oat/x86_64/services.odex" $((0xcd5656)) 1f 3a # jz seguir -> jz devolver false
+
 # Google Play: solo lo necesario para iniciar sesión, instalar y actualizar apps. Sin el asistente
 # de configuración (frenaría el primer arranque) ni las apps de Google que reemplazan a las de AOSP.
 mkdir /tmp/g
