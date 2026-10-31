@@ -917,11 +917,6 @@ impl Zykro {
                     if icono(ui, ic::PACKAGE, "Instalar APK", t, FONDO_HOVER).clicked() {
                         android::instalar_apk(self.estado.clone());
                     }
-                    if icono(ui, ic::FOLDER_SIMPLE, "Abrir carpeta de capturas", t, FONDO_HOVER).clicked() {
-                        let carpeta = carpeta_capturas();
-                        let _ = std::fs::create_dir_all(&carpeta);
-                        let _ = Command::new("xdg-open").arg(carpeta).spawn();
-                    }
                 });
                 ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
                     ui.add_space(8.0);
