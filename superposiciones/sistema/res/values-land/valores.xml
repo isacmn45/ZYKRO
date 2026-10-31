@@ -3,4 +3,6 @@
 <resources>
     <dimen name="qqs_layout_margin_top">4dp</dimen>
     <dimen name="qs_brightness_margin_bottom">6dp</dimen>
+    <!-- 3 filas de botones por página en el panel desplegado (antes 2). -->
+    <integer name="quick_settings_max_rows">3</integer>
 </resources>

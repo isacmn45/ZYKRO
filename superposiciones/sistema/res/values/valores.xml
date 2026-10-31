@@ -3,18 +3,19 @@
      notificaciones más chicos. El texto de cada notificación lo pone Android, no SystemUI. -->
 <resources>
     <!-- Botones rápidos: fila corta (antes 60 dp), panel completo (antes 80 dp), letra (antes 14 sp),
-         ícono, relleno y separación. -->
-    <dimen name="qs_quick_tile_size">44dp</dimen>
-    <dimen name="qs_tile_height">56dp</dimen>
-    <dimen name="qs_tile_text_size">12sp</dimen>
-    <dimen name="qs_icon_size">18dp</dimen>
-    <dimen name="qs_tile_padding">8dp</dimen>
-    <dimen name="qs_tile_margin_horizontal">6dp</dimen>
-    <dimen name="qs_label_container_margin">6dp</dimen>
-    <dimen name="qs_corner_radius">20dp</dimen>
+         ícono, relleno y separación. SystemUI no deja más de 4 por fila (lo fija su código), así que
+         lo que los hace angostos es el panel centrado (ver notification_panel_margin_horizontal). -->
+    <dimen name="qs_quick_tile_size">36dp</dimen>
+    <dimen name="qs_tile_height">48dp</dimen>
+    <dimen name="qs_tile_text_size">11sp</dimen>
+    <dimen name="qs_icon_size">16dp</dimen>
+    <dimen name="qs_tile_padding">6dp</dimen>
+    <dimen name="qs_tile_margin_horizontal">4dp</dimen>
+    <dimen name="qs_label_container_margin">4dp</dimen>
+    <dimen name="qs_corner_radius">16dp</dimen>
 
     <!-- Encabezado con la hora y la fecha (antes 48 dp de alto) y su separación con los botones. -->
-    <dimen name="qs_header_row_min_height">36dp</dimen>
+    <dimen name="qs_header_row_min_height">32dp</dimen>
     <dimen name="qqs_layout_margin_top">4dp</dimen>
 
     <!-- Barra de abajo del panel (ajustes, apagar) y separación del brillo. -->
@@ -27,6 +28,9 @@
     <dimen name="notification_corner_radius">16dp</dimen>
     <dimen name="notification_shelf_height">36dp</dimen>
     <dimen name="notification_panel_margin_bottom">16dp</dimen>
+    <!-- Todo el panel (botones y notificaciones) en una columna centrada, como en una tablet: a lo
+         ancho de la pantalla, cada botón medía un cuarto de ella. -->
+    <dimen name="notification_panel_margin_horizontal">160dp</dimen>
 
     <!-- Panel de volumen: barra más corta (antes 192 dp; 137 en pantallas como la de ZYKRO, ver
          values-h411dp), panel más angosto (antes 56 dp) y botones y márgenes más chicos. -->
