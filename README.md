@@ -72,6 +72,8 @@ como la de BlueStacks.
   juego.
 - **Extras:** selector de apps abiertas, capturas de pantalla, scroll con la rueda o el touchpad y
   temperatura de la CPU y la GPU en la barra de título.
+- **Reiniciar:** el diálogo de cierre permite cancelar, cerrar o reiniciar ZYKRO y Android.
+  Reiniciar conserva las apps, datos y configuración, y carga el ejecutable instalado más reciente.
 
 ## Requisitos
 

@@ -21,6 +21,7 @@ mod menu;
 mod panel;
 mod raton;
 mod recientes;
+mod reinicio;
 mod rendimiento;
 mod ritmo;
 mod rueda;
@@ -83,22 +84,29 @@ const AVISO: Color32 = Color32::from_rgb(0xf5, 0x9e, 0x0b);
 const APLICAR_ANDROID: &str = "--aplicar-android";
 /// Reabrir ZYKRO restaurando antes un respaldo de Android (`--restaurar archivo.tar`).
 const RESTAURAR: &str = "--restaurar";
+const REINICIAR: &str = "--reiniciar";
 /// Ícono de la app, generado desde desktop/zykro.svg con `rsvg-convert -w 256 -h 256`.
 const ICONO_PNG: &[u8] = include_bytes!("../assets/icono.png");
 
 fn main() -> eframe::Result {
-    registrar_en_archivo();
     // Desde el acceso directo de una app (`--abrir paquete`): si ZYKRO ya está abierto, solo se abre
     // la app en Android; si no, ZYKRO se abre y la abre cuando Android esté listo.
-    if let Some(paquete) = std::env::args().skip_while(|a| a != "--abrir").nth(1) {
-        if !tomar_instancia(false) {
+    let paquete = std::env::args().skip_while(|a| a != "--abrir").nth(1);
+    let _instancia = tomar_instancia(paquete.is_none()).map_err(|error| eframe::Error::AppCreation(Box::new(error)))?;
+    if let Some(paquete) = paquete {
+        if _instancia.is_none() {
             android::abrir_app(&paquete);
             return Ok(());
         }
         *android::ABRIR_AL_INICIAR.lock().unwrap() = Some(paquete);
-    } else {
-        // Al reabrirse para aplicar la configuración, la ventana anterior lo suelta al cerrarse.
-        thread::spawn(|| tomar_instancia(true));
+    }
+    registrar_en_archivo();
+    if std::env::args().any(|arg| arg == REINICIAR) {
+        reinicio::esperar_apagado(Command::new("docker").args(["stop", "-t", "5", android::CONTENEDOR]))
+            .map_err(|error| {
+                avisar_error_reapertura(&error.to_string());
+                eframe::Error::AppCreation(Box::new(error))
+            })?;
     }
     let opciones = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -272,6 +280,7 @@ struct Zykro {
     cierre_confirmado: bool,
     /// Al cerrar, volver a abrir ZYKRO para aplicar la configuración de Android.
     reabrir: bool,
+    reiniciar_android: bool,
     /// El mapeo está convirtiendo teclas en toques en este momento.
     mapeo_activo: bool,
     cursor_bloqueado: bool,
@@ -392,6 +401,7 @@ impl Zykro {
             confirmar_cierre: false,
             cierre_confirmado: false,
             reabrir: false,
+            reiniciar_android: false,
             mapeo_activo: false,
             cursor_bloqueado: false,
             apuntando_antes: false,
@@ -1482,6 +1492,13 @@ impl eframe::App for Zykro {
                     self.cierre_confirmado = true;
                     ctx.send_viewport_cmd(ViewportCommand::Close);
                 }
+                Some(cierre::Respuesta::Reiniciar) => {
+                    self.confirmar_cierre = false;
+                    self.reabrir = true;
+                    self.reiniciar_android = true;
+                    self.cierre_confirmado = true;
+                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                }
                 Some(cierre::Respuesta::Cancelar) => self.confirmar_cierre = false,
                 None => {}
             }
@@ -1533,8 +1550,7 @@ impl eframe::App for Zykro {
         gamepad::limpiar_nodos();
         rendimiento::restaurar();
         if self.reabrir {
-            // La ventana nueva apaga Android antes de recrearlo.
-            reabrir(self.restaurar.as_deref());
+            reabrir(self.restaurar.as_deref(), self.reiniciar_android);
         } else {
             android::apagar();
         }
@@ -1624,22 +1640,13 @@ fn aplicar_modo(estado: &android::EstadoCompartido, modo: rendimiento::Modo, avi
 
 /// Toma el candado de «ZYKRO está abierto» (~/.cache/zykro/instancia.lock) y no lo suelta hasta
 /// cerrarse. Con `esperar`, espera a que lo suelte otra ventana; si no, dice si estaba libre.
-fn tomar_instancia(esperar: bool) -> bool {
-    use std::os::fd::AsRawFd;
+fn tomar_instancia(esperar: bool) -> std::io::Result<Option<std::fs::File>> {
     let cache = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".cache"))
         .join("zykro");
-    let _ = std::fs::create_dir_all(&cache);
-    let Ok(archivo) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(cache.join("instancia.lock")) else {
-        return true;
-    };
-    let modo = if esperar { libc::LOCK_EX } else { libc::LOCK_EX | libc::LOCK_NB };
-    if unsafe { libc::flock(archivo.as_raw_fd(), modo) } != 0 {
-        return false;
-    }
-    std::mem::forget(archivo);
-    true
+    std::fs::create_dir_all(&cache)?;
+    reinicio::bloquear(&cache.join("instancia.lock"), esperar)
 }
 
 /// Avisa en el escritorio (con notify-send) de una notificación de Android.
@@ -1708,19 +1715,19 @@ fn registrar_en_archivo() {
 }
 
 /// Abre otra vez ZYKRO para que recree Android con la configuración guardada.
-fn reabrir(restaurar: Option<&std::path::Path>) {
+fn reabrir(restaurar: Option<&std::path::Path>, reiniciar: bool) {
     use std::os::unix::process::CommandExt;
     // Si ZYKRO se reinstaló mientras corría, el ejecutable viejo figura como «(deleted)».
-    let exe = std::env::current_exe().map(|e| PathBuf::from(e.to_string_lossy().trim_end_matches(" (deleted)")));
-    let exe = exe.unwrap_or_else(|_| PathBuf::from("zykro"));
-    let mut orden = Command::new(&exe);
-    match restaurar {
-        Some(respaldo) => orden.arg(RESTAURAR).arg(respaldo),
-        None => orden.arg(APLICAR_ANDROID),
-    };
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("zykro"));
+    let mut orden = reinicio::comando(&exe, restaurar, reiniciar);
     if let Err(e) = orden.process_group(0).spawn() {
-        eprintln!("[zykro] no se pudo volver a abrir {}: {e}", exe.display());
+        avisar_error_reapertura(&format!("No se pudo volver a abrir {}: {e}", exe.display()));
     }
+}
+
+fn avisar_error_reapertura(mensaje: &str) {
+    eprintln!("[zykro] {mensaje}");
+    let _ = Command::new("notify-send").args(["ZYKRO: no se pudo reiniciar", mensaje]).status();
 }
 
 /// Dónde se guardan las capturas: la elegida en Preferencias o ~/Imágenes/ZYKRO.
