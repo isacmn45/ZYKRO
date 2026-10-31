@@ -45,8 +45,6 @@ pub struct Estado {
     pub reinicio: Option<config::Android>,
     /// El juego tiene abierto su cuadro de texto (chat): el mapeo se apaga para poder escribir.
     pub escribiendo: bool,
-    /// El engrane del inicio de ZYKRO pidió abrir los ajustes de Android de ZYKRO.
-    pub pedir_ajustes: bool,
     /// Cambiaron las notificaciones (las exporta la pantalla de inicio de ZYKRO).
     pub notificaciones_cambiaron: bool,
     /// Entre los cambios hay una notificación que avisa: ZYKRO la muestra como emergente.
@@ -444,8 +442,8 @@ fn ocultar_teclado_en_pantalla() {
 }
 
 /// Escucha lo que la pantalla de inicio de ZYKRO pide por el registro de Android (etiqueta `ZYKRO`):
-/// abrir los ajustes de Android de ZYKRO al tocar su engrane o la ventana de fondos al mantener
-/// presionado un espacio vacío, y avisar que cambiaron las notificaciones o el fondo.
+/// abrir la ventana de fondos al mantener presionado un espacio vacío, y avisar que cambiaron las
+/// notificaciones o el fondo.
 pub fn vigilar_peticiones(ctx: egui::Context, estado: EstadoCompartido) {
     use std::io::{BufRead, BufReader};
     thread::Builder::new()
@@ -461,7 +459,6 @@ pub fn vigilar_peticiones(ctx: egui::Context, estado: EstadoCompartido) {
             if let Ok(mut hijo) = hijo {
                 for linea in BufReader::new(hijo.stdout.take().unwrap()).lines().map_while(Result::ok) {
                     match linea.trim() {
-                        "ajustes" => estado.lock().unwrap().pedir_ajustes = true,
                         "fondos" => estado.lock().unwrap().pedir_fondos = true,
                         "fondo" => estado.lock().unwrap().fondo_cambio = true,
                         "notificaciones" => estado.lock().unwrap().notificaciones_cambiaron = true,

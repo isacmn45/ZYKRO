@@ -218,7 +218,7 @@ struct Zykro {
     cuadros_seg: u32,
     inicio_seg: Instant,
     ajustes: ajustes::Ajustes,
-    /// Ajustes de Android de ZYKRO (el engrane de la pantalla de inicio).
+    /// Ajustes de Android de ZYKRO (el botón «Ajustes» del panel de notificaciones).
     ajustes_android: ajustes_android::AjustesAndroid,
     fondos: fondos::Fondos,
     /// Panel de notificaciones al estilo de Android 4 (se baja desde el borde de arriba).
@@ -600,7 +600,7 @@ impl Zykro {
     }
 
     /// Botón de controles: abre o cierra el menú rápido (o cierra el editor si está abierto).
-    fn boton_controles(&mut self, boton: &egui::Response, abajo: bool) {
+    fn boton_controles(&mut self, boton: &egui::Response) {
         if !boton.clicked() {
             return;
         }
@@ -609,7 +609,7 @@ impl Zykro {
         } else if self.menu.abierto() {
             self.cerrar_menu();
         } else {
-            self.menu.abrir(boton.rect, abajo);
+            self.menu.abrir(boton.rect);
         }
     }
 
@@ -879,8 +879,9 @@ impl Zykro {
                         if icono(ui, ic::MINUS, "Minimizar", t, FONDO_HOVER).clicked() {
                             ctx.send_viewport_cmd(ViewportCommand::Minimized(true));
                         }
-                        let boton = icono(ui, ic::GAME_CONTROLLER, "Controles del juego", t, FONDO_HOVER);
-                        self.boton_controles(&boton, true);
+                        if icono(ui, ic::GEAR, "Configuración", t, FONDO_HOVER).clicked() {
+                            self.abrir_ajustes();
+                        }
                     });
                 });
             });
@@ -902,11 +903,8 @@ impl Zykro {
                     if icono(ui, ic::CORNERS_OUT, "Pantalla completa (F11)", t, FONDO_HOVER).clicked() {
                         alternar_pantalla_completa(ctx);
                     }
-                    if icono(ui, ic::GEAR, "Configuración", t, FONDO_HOVER).clicked() {
-                        self.abrir_ajustes();
-                    }
                     let boton = icono(ui, ic::KEYBOARD, "Controles del juego", t, FONDO_HOVER);
-                    self.boton_controles(&boton, false);
+                    self.boton_controles(&boton);
                     if icono(ui, ic::SPEAKER_HIGH, "Subir volumen", t, FONDO_HOVER).clicked() {
                         self.pulsar(24);
                     }
@@ -1242,9 +1240,6 @@ impl eframe::App for Zykro {
                 Some(cierre::Respuesta::Cancelar) => self.confirmar_cierre = false,
                 None => {}
             }
-        }
-        if std::mem::take(&mut self.estado.lock().unwrap().pedir_ajustes) {
-            self.ajustes_android.abrir(ctx);
         }
         // Con el panel cerrado solo hace falta leerlas si una avisa (para la emergente): así una
         // descarga que actualiza su progreso no tiene a ZYKRO leyendo todo el tiempo.

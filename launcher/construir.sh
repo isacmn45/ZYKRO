@@ -17,7 +17,7 @@ trap 'rm -rf "$TMP"' EXIT
 
 "$HERRAMIENTAS/aapt2" compile --dir res -o "$TMP/recursos.zip"
 "$HERRAMIENTAS/aapt2" link -o "$TMP/base.apk" -I "$ANDROID_JAR" --manifest AndroidManifest.xml \
-    --min-sdk-version 30 --target-sdk-version 33 --version-code 5 --version-name 1.4 \
+    --min-sdk-version 30 --target-sdk-version 33 --version-code 6 --version-name 1.5 \
     --java "$TMP/gen" "$TMP/recursos.zip"
 
 # Concatenar texto sin invokedynamic: así d8 no tiene nada que traducir.

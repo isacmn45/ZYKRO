@@ -485,19 +485,9 @@ public class Inicio extends Activity implements TextWatcher {
         reloj.setFormat12Hour("h:mm a");
         reloj.setTextColor(TEXTO);
         reloj.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        reloj.setPadding(px(12), 0, px(8), 0);
+        reloj.setPadding(px(12), 0, px(4), 0);
         sombra(reloj);
         barra.addView(reloj);
-
-        // ZYKRO escucha esta línea del registro y abre su panel de ajustes de Android, más cómodo en
-        // un emulador. Mantenerlo presionado abre la Configuración de Android de siempre.
-        ImageView ajustes = botonIcono(getDrawable(R.drawable.engrane), vista -> Log.i(ETIQUETA, "ajustes"));
-        ajustes.setOnLongClickListener(vista -> {
-            abrir(new Intent(Settings.ACTION_SETTINGS));
-            return true;
-        });
-        ajustes.setContentDescription("Ajustes");
-        barra.addView(ajustes);
         return barra;
     }
 

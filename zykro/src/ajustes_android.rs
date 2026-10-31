@@ -1,7 +1,8 @@
 //! Ajustes de Android al estilo de la ventana de Configuración de ZYKRO: lo que más se usa en un
 //! emulador, compacto (la app de Configuración de Android se ve enorme en una ventana de laptop).
-//! Se abre con el engrane de la pantalla de inicio de ZYKRO. ZYKRO cambia los ajustes desde la shell
-//! de Android, como root; lo que necesita la interfaz de Android (cuentas, permisos) se abre ahí.
+//! Se abre con el botón «Ajustes» del panel de notificaciones de ZYKRO. ZYKRO cambia los ajustes
+//! desde la shell de Android, como root; lo que necesita la interfaz de Android (cuentas, permisos)
+//! se abre ahí.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

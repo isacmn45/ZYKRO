@@ -16,8 +16,8 @@ pub enum Salida {
 
 #[derive(Default)]
 pub struct Menu {
-    /// Botón que lo abrió (`None` = cerrado) y si el menú sale hacia abajo o hacia la izquierda.
-    boton: Option<(Rect, bool)>,
+    /// Botón de la barra lateral que lo abrió (`None` = cerrado): el menú sale a su izquierda.
+    boton: Option<Rect>,
     /// Hubo cambios que guardar al cerrar.
     cambiado: bool,
 }
@@ -27,9 +27,8 @@ impl Menu {
         self.boton.is_some()
     }
 
-    /// `abajo`: el botón está en la barra de título; si no, en la barra lateral.
-    pub fn abrir(&mut self, boton: Rect, abajo: bool) {
-        self.boton = Some((boton, abajo));
+    pub fn abrir(&mut self, boton: Rect) {
+        self.boton = Some(boton);
         self.cambiado = false;
     }
 
@@ -41,20 +40,16 @@ impl Menu {
 
     /// Dibuja el menú. `mapa` es el del motor: los cambios se aplican al momento.
     pub fn mostrar(&mut self, ctx: &egui::Context, mapa: Option<&mut Mapa>) -> Salida {
-        let Some((boton, abajo)) = self.boton else { return Salida::Nada };
+        let Some(boton) = self.boton else { return Salida::Nada };
         let mut salida = Salida::Nada;
-        let (pivote, pos) = if abajo {
-            (Align2::RIGHT_TOP, boton.right_bottom() + Vec2::new(0.0, 4.0))
-        } else {
-            (Align2::RIGHT_TOP, boton.left_top() - Vec2::new(4.0, 0.0))
-        };
         let marco = egui::Frame::new()
             .fill(FONDO)
             .corner_radius(8.0)
             .stroke(Stroke::new(1.0, FONDO_HOVER))
             .shadow(ctx.global_style().visuals.popup_shadow)
             .inner_margin(egui::Margin::same(12));
-        let area = egui::Area::new(Id::new("menu_controles")).order(Order::Foreground).pivot(pivote).fixed_pos(pos).show(ctx, |ui| {
+        let pos = boton.left_top() - Vec2::new(4.0, 0.0);
+        let area = egui::Area::new(Id::new("menu_controles")).order(Order::Foreground).pivot(Align2::RIGHT_TOP).fixed_pos(pos).show(ctx, |ui| {
             marco.show(ui, |ui| {
                 ui.set_width(250.0);
                 ui.spacing_mut().item_spacing.y = 8.0;
