@@ -10,8 +10,14 @@ como la de BlueStacks.
 - **Imagen sin comprimir y sin copias:** cada cuadro de Android llega como DMA-BUF y se dibuja directo
   desde la GPU. La ventana lleva su propio ritmo de cuadros con los avisos de KWin, para no sumar
   retraso.
-- **Mapeo de teclas para juegos:** mismo formato que SwagPlayer/QtScrcpy, con un editor visual de
-  controles sobre el juego y un menú rápido, al estilo de BlueStacks 5.
+- **Mapeo de teclas para juegos con los controles de BlueStacks 5:** tocar el punto, toques
+  repetidos, D-pad (con teclas para correr, velocidad, activación y zona muerta), apuntar y disparar,
+  mirada libre, script (mismos comandos que BlueStacks), deslizar, zoom, D-pad y habilidad MOBA
+  (lanzamiento rápido, automático o manual), rotar, desplazamiento de borde, desplazarse y rueda del
+  mouse, cada uno con sus ajustes avanzados. Apuntar tiene punto de mira (estilo, tamaño, opacidad y
+  color), aceleración del mouse y mirar alrededor sin mover la mira. Varios esquemas de controles por
+  juego, que se importan, exportan y cambian desde el menú rápido. Lee los mapas de SwagPlayer y
+  QtScrcpy. La inclinación no está: este Android no tiene sensores.
 - **Puntería como BlueStacks:** el mouse se lee directo (evdev) y la cámara usa la misma fórmula que
   BlueStacks 5, así que la sensibilidad se siente igual. `` ` `` suspende o activa la puntería.
 - **Sonido** de Android.

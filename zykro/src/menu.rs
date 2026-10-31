@@ -11,6 +11,8 @@ pub enum Salida {
     Nada,
     /// Abrir el editor completo.
     Editor,
+    /// Usar otro esquema de controles.
+    Esquema(String),
     Cerrar,
 }
 
@@ -20,6 +22,8 @@ pub struct Menu {
     boton: Option<Rect>,
     /// Hubo cambios que guardar al cerrar.
     cambiado: bool,
+    /// Los esquemas de controles del juego.
+    esquemas: Vec<String>,
 }
 
 impl Menu {
@@ -27,8 +31,9 @@ impl Menu {
         self.boton.is_some()
     }
 
-    pub fn abrir(&mut self, boton: Rect) {
+    pub fn abrir(&mut self, boton: Rect, esquemas: Vec<String>) {
         self.boton = Some(boton);
+        self.esquemas = esquemas;
         self.cambiado = false;
     }
 
@@ -62,6 +67,20 @@ impl Menu {
                         }
                     });
                 });
+                // Como en BlueStacks: cambiar de esquema sin abrir el editor.
+                if let Some(m) = mapa.as_ref().filter(|_| self.esquemas.len() > 1) {
+                    let actual = m.esquema();
+                    let mut elegido = actual.clone();
+                    ui.label(RichText::new("ESQUEMA DE CONTROLES").size(10.5).strong().color(TENUE));
+                    egui::ComboBox::from_id_salt("menu-esquema").selected_text(&actual).width(ui.available_width() - 4.0).show_ui(ui, |ui| {
+                        for nombre in &self.esquemas {
+                            ui.selectable_value(&mut elegido, nombre.clone(), nombre);
+                        }
+                    });
+                    if elegido != actual {
+                        salida = Salida::Esquema(elegido);
+                    }
+                }
                 match mapa {
                     Some(Mapa { raton: Some(r), .. }) => {
                         ui.label(RichText::new("SENSIBILIDAD DE LA PUNTERÍA").size(10.5).strong().color(TENUE));

@@ -24,6 +24,7 @@ mod recientes;
 mod rendimiento;
 mod ritmo;
 mod rueda;
+mod script;
 mod sensores;
 mod telefono;
 mod textura;
@@ -250,6 +251,8 @@ struct Zykro {
     rect_imagen: Rect,
     /// Respaldo que la ventana nueva tiene que restaurar al reabrirse.
     restaurar: Option<PathBuf>,
+    /// Lo que falta de un paso de la rueda (los touchpads mandan fracciones).
+    rueda_acumulada: f32,
     /// Panel de notificaciones al estilo de Android 4 (se baja desde el borde de arriba).
     panel: panel::Panel,
     motor: Arc<Mutex<mapeo::Motor>>,
@@ -377,6 +380,7 @@ impl Zykro {
             app_anterior: None,
             rect_imagen: Rect::NOTHING,
             restaurar: None,
+            rueda_acumulada: 0.0,
             panel: panel::Panel::default(),
             motor,
             raton_directo,
@@ -787,7 +791,8 @@ impl Zykro {
         } else if self.menu.abierto() {
             self.cerrar_menu();
         } else {
-            self.menu.abrir(boton.rect);
+            let paquete = self.motor().paquete.clone();
+            self.menu.abrir(boton.rect, mapeo::esquemas(&paquete));
         }
     }
 
@@ -864,6 +869,13 @@ impl Zykro {
         }
         if activo {
             if let Some(c) = &control {
+                // Dónde está el cursor (para los controles MOBA, el borde y los scripts).
+                let r = self.rect_imagen;
+                let puntero = ctx
+                    .input(|i| i.pointer.hover_pos())
+                    .filter(|p| r.contains(*p) && r.width() > 0.0)
+                    .map(|p| ((p.x - r.min.x) / r.width() * w, (p.y - r.min.y) / r.height() * h));
+                motor.puntero(puntero, c, w, h);
                 motor.tick(c, w, h);
             }
             if motor.ocupado() {
@@ -1170,9 +1182,13 @@ impl Zykro {
             let escribiendo = self.estado.lock().unwrap().escribiendo;
             if self.editor.abierto {
                 self.editor.pantalla(ui, rect);
-            } else if let Some(mapa) = &self.motor().mapa {
-                if mapa.overlay.enabled && !escribiendo {
+            } else {
+                let motor = self.motor();
+                if let Some(mapa) = motor.mapa.as_ref().filter(|m| m.overlay.enabled && !escribiendo) {
                     editor::dibujar(&ui.painter_at(rect), rect, mapa, mapa.overlay.opacity, None, false);
+                }
+                if let Some(mira) = motor.mira() {
+                    editor::dibujar_mira(&ui.painter_at(rect), rect, &mira);
                 }
             }
             if escribiendo && self.motor().mapa.is_some() {
@@ -1295,6 +1311,10 @@ impl Zykro {
                         control.toque(SOLTAR, 0, x, y, w, h);
                     }
                 }
+                // Una habilidad MOBA manual apuntando: el clic izquierdo la lanza (no le llega a Android).
+                Event::PointerButton { button: PointerButton::Primary, pressed, .. } if activo && !bloqueado && self.motor().captura_clic() => {
+                    self.motor().boton(PointerButton::Primary, pressed, &control, ancho, alto);
+                }
                 Event::PointerButton { pos, button: PointerButton::Primary, pressed: true, .. } if rect.contains(pos) => {
                     let (x, y) = a_android(pos);
                     control.toque(BAJAR, 0, x, y, w, h);
@@ -1316,7 +1336,26 @@ impl Zykro {
                         control.toque(SOLTAR, 0, x, y, w, h);
                     }
                 }
-                Event::MouseWheel { unit, delta, .. } if !bloqueado && self.tocando.is_none() => {
+                Event::MouseWheel { unit, delta, .. } => {
+                    // Zoom, desplazarse o rueda del mouse del mapeo (también con la puntería activa).
+                    if activo && self.motor().usa_rueda() {
+                        let lineas = match unit {
+                            MouseWheelUnit::Point => delta.y / 40.0,
+                            MouseWheelUnit::Line => delta.y,
+                            MouseWheelUnit::Page => delta.y * 3.0,
+                        };
+                        // Los touchpads mandan fracciones: cuenta pasos enteros.
+                        self.rueda_acumulada += lineas;
+                        let pasos = self.rueda_acumulada.trunc();
+                        self.rueda_acumulada -= pasos;
+                        let usada = pasos != 0.0 && self.motor().rueda(pasos, &control, ancho, alto);
+                        if usada || self.motor().rueda_exclusiva() {
+                            continue;
+                        }
+                    }
+                    if bloqueado || self.tocando.is_some() {
+                        continue;
+                    }
                     let Some(pos) = puntero.filter(|p| rect.contains(*p) && !self.panel.sobre_emergente(*p)) else { continue };
                     // El dedo se mueve hacia donde va el contenido: rueda hacia abajo = dedo hacia arriba.
                     let d = match unit {
@@ -1417,6 +1456,18 @@ impl eframe::App for Zykro {
             menu::Salida::Editor => {
                 self.cerrar_menu();
                 self.abrir_editor();
+            }
+            menu::Salida::Esquema(nombre) => {
+                let paquete = self.motor().paquete.clone();
+                if let Some(mapa) = mapeo::cargar_esquema(&paquete, &nombre) {
+                    let (w, h) = self.dimensiones();
+                    if let Some(c) = self.control() {
+                        self.motor().soltar_todo(&c, w, h);
+                    }
+                    let _ = mapa.guardar(&paquete);
+                    self.motor().mapa = Some(mapa);
+                    android::avisar(&self.estado, format!("Esquema «{nombre}»"));
+                }
             }
         }
         // Cerrar la ventana (X, Alt+F4, barra de tareas) primero pide confirmación.

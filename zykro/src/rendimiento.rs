@@ -384,10 +384,10 @@ mod pruebas {
         }
         let antes = perfil_actual();
         println!("perfil antes: {antes:?}");
-        println!("aplicar Ahorro: {:?}", aplicar(Modo::Ahorro));
+        println!("aplicar Ahorro: {:?}", aplicar(Modo::Ahorro, None));
         let cpu = Command::new("docker").args(["inspect", "-f", "{{.HostConfig.NanoCpus}} {{.HostConfig.CpuShares}}", CONTENEDOR]).output().unwrap();
         println!("perfil ahora: {:?}, docker: {}", perfil_actual(), String::from_utf8_lossy(&cpu.stdout).trim());
-        println!("aplicar Ultra: {:?}", aplicar(Modo::Ultra));
+        println!("aplicar Ultra: {:?}", aplicar(Modo::Ultra, None));
         restaurar();
         let cpu = Command::new("docker").args(["inspect", "-f", "{{.HostConfig.NanoCpus}} {{.HostConfig.CpuShares}}", CONTENEDOR]).output().unwrap();
         println!("restaurado: perfil {:?}, docker: {}", perfil_actual(), String::from_utf8_lossy(&cpu.stdout).trim());
