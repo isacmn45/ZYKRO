@@ -45,7 +45,7 @@ const MESES: [&str; 12] = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago
 /// Lo que la ventana tiene que hacer al tocar algunos interruptores.
 pub enum Accion {
     Captura,
-    Configuracion,
+    ConfiguracionAndroid,
     AjustesAndroid,
     /// Abrir el panel de Android de siempre (música, responder mensajes).
     PanelAndroid,
@@ -311,9 +311,9 @@ impl Panel {
                 self.cerrar();
             }
             let configuracion = Rect::from_min_size(Pos2::new(cerrar.min.x - 42.0, y + 3.0), Vec2::splat(34.0));
-            if boton_icono(ui, &p, configuracion, ic::GEAR, "Configuración de ZYKRO") {
+            if boton_icono(ui, &p, configuracion, ic::GEAR, "Configuración de Android") {
                 self.cerrar();
-                accion = Some(Accion::Configuracion);
+                accion = Some(Accion::ConfiguracionAndroid);
             }
             let borrar = Rect::from_min_size(Pos2::new(configuracion.min.x - 8.0 - 130.0, y + 3.0), Vec2::new(130.0, 34.0));
             if d.notificaciones.iter().any(|n| n.descartable) && boton_texto(ui, &p, borrar, ic::BROOM, "Borrar todo") {
@@ -771,7 +771,7 @@ mod pruebas {
     use super::*;
 
     #[test]
-    fn tuerca_abre_configuracion_de_zykro_y_cierra_panel() {
+    fn tuerca_abre_configuracion_completa_de_android_y_cierra_panel() {
         let ctx = egui::Context::default();
         let area = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
         let mut panel = Panel { abierto: true, visible: true, posicion: Deslizar::quieto(0.0), ..Default::default() };
@@ -787,7 +787,7 @@ mod pruebas {
         }
         let mut accion = None;
         ctx.run_ui(clic, |ui| { accion = panel.mostrar(ui.ctx(), area); }).drop_without_applying_deltas();
-        assert!(matches!(accion, Some(Accion::Configuracion)));
+        assert!(matches!(accion, Some(Accion::ConfiguracionAndroid)));
         assert!(!panel.visible);
     }
 }
