@@ -11,6 +11,7 @@ mod config;
 mod control;
 mod curva;
 mod editor;
+mod fondos;
 mod mapeo;
 mod menu;
 mod panel;
@@ -219,6 +220,7 @@ struct Zykro {
     ajustes: ajustes::Ajustes,
     /// Ajustes de Android de ZYKRO (el engrane de la pantalla de inicio).
     ajustes_android: ajustes_android::AjustesAndroid,
+    fondos: fondos::Fondos,
     /// Panel de notificaciones al estilo de Android 4 (se baja desde el borde de arriba).
     panel: panel::Panel,
     motor: Arc<Mutex<mapeo::Motor>>,
@@ -331,6 +333,7 @@ impl Zykro {
             inicio_seg: Instant::now(),
             ajustes: ajustes::Ajustes::new(),
             ajustes_android: ajustes_android::AjustesAndroid::new(),
+            fondos: fondos::Fondos::default(),
             panel: panel::Panel::default(),
             motor,
             raton_directo,
@@ -649,6 +652,7 @@ impl Zykro {
             && !self.editor.abierto
             && !self.ajustes.abierto
             && !self.ajustes_android.abierto
+            && !self.fondos.abierto()
             && !self.panel.abierto()
             && !self.menu.abierto()
             && !self.confirmar_cierre
@@ -1019,7 +1023,15 @@ impl Zykro {
 
             if self.editor.abierto {
                 self.teclas_editor(ctx);
-            } else if !en_borde && !self.ajustes.abierto && !self.ajustes_android.abierto && !self.panel.abierto() && !self.menu.abierto() && !self.confirmar_cierre && !self.recientes.abierto() {
+            } else if !en_borde
+                && !self.ajustes.abierto
+                && !self.ajustes_android.abierto
+                && !self.fondos.abierto()
+                && !self.panel.abierto()
+                && !self.menu.abierto()
+                && !self.confirmar_cierre
+                && !self.recientes.abierto()
+            {
                 self.entrada(ctx, rect, ancho, alto);
             }
             if let Some(recientes::Accion::Inicio) = self.recientes.mostrar(ctx, area, rect, self.pantalla.id()) {
@@ -1244,6 +1256,16 @@ impl eframe::App for Zykro {
             self.panel.recargar(ctx);
         }
         self.ajustes_android.mostrar(ctx, &self.estado);
+        let (pedir_fondos, fondo_cambio) = {
+            let mut estado = self.estado.lock().unwrap();
+            (std::mem::take(&mut estado.pedir_fondos), std::mem::take(&mut estado.fondo_cambio))
+        };
+        if pedir_fondos {
+            self.fondos.abrir(ctx);
+        } else if fondo_cambio {
+            self.fondos.recargar(ctx);
+        }
+        self.fondos.mostrar(ctx, &self.estado);
         if let Some(nueva) = self.ajustes.mostrar(ctx) {
             self.aplicar_config(ctx, nueva);
         }

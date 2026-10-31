@@ -36,6 +36,14 @@
             </intent-filter>
         </activity>
 
+        <!-- Elegir el fondo de pantalla en la galería de Android (lo abre ZYKRO). -->
+        <activity
+            android:name=".ElegirFondo"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- Notificaciones para el panel de ZYKRO (ZYKRO le da el permiso al arrancar). -->
         <service
             android:name=".Escucha"

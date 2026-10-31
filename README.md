@@ -21,9 +21,11 @@ como la de BlueStacks.
 - **Pantalla:** resolución, DPI y FPS de Android; pantalla completa con FPS y temperatura en una esquina;
   la ventana mantiene la proporción de la imagen al cambiar de tamaño.
 - **Pantalla de inicio propia**, al estilo de BlueStacks 5 y compacta: buscador, tus apps y juegos, y
-  una carpeta con las del sistema. Su engrane abre unos **ajustes de Android compactos** dentro de
-  ZYKRO: apps (abrir, detener, borrar caché o datos, desinstalar), idioma, letra, animaciones y
-  almacenamiento.
+  una carpeta con las del sistema. Mantener presionado un espacio vacío abre los **fondos de
+  pantalla**: doce fondos de ZYKRO, una imagen de tu computadora o una de la galería de Android
+  (se recorta sola a la pantalla y respeta las fotos giradas del celular). Su engrane abre unos
+  **ajustes de Android compactos** dentro de ZYKRO: apps (abrir, detener, borrar caché o datos,
+  desinstalar), idioma, letra, animaciones y almacenamiento.
 - **Interfaz de Android compacta:** la app de Configuración, el centro de control, el panel de
   notificaciones y el de volumen vienen con letra, filas, botones y encabezados más chicos, para que
   quepan en una ventana de laptop.

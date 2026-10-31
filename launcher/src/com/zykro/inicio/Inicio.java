@@ -12,6 +12,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -62,7 +63,8 @@ import java.util.concurrent.Executors;
 
 /**
  * Pantalla de inicio de ZYKRO, al estilo de BlueStacks 5: buscador arriba, tus apps y juegos juntos y
- * las del sistema en una carpeta.
+ * las del sistema en una carpeta. Mantener presionado un espacio vacío abre la ventana de fondos de
+ * pantalla de ZYKRO.
  */
 public class Inicio extends Activity implements TextWatcher {
     // Colores de ZYKRO (los mismos de su ventana).
@@ -84,6 +86,9 @@ public class Inicio extends Activity implements TextWatcher {
     /** Tiendas de apps, en orden de preferencia, para el botón de arriba. */
     private static final String[] TIENDAS = {"com.android.vending", "com.aurora.store"};
 
+    /** La que está abierta, para que {@link Fondo} le avise que cambió el fondo. */
+    static volatile Inicio activa;
+
     private static final class App {
         String paquete;
         ComponentName actividad;
@@ -99,6 +104,8 @@ public class Inicio extends Activity implements TextWatcher {
     private int carga;
     private float dp;
     private FrameLayout raiz;
+    private ImageView imagenFondo;
+    private View veloFondo;
     private ScrollView desplazable;
     private LinearLayout contenido;
     private EditText buscador;
@@ -112,8 +119,18 @@ public class Inicio extends Activity implements TextWatcher {
         super.onCreate(guardado);
         dp = getResources().getDisplayMetrics().density;
 
+        activa = this;
         raiz = new FrameLayout(this);
         raiz.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] {FONDO_ARRIBA, FONDO_ABAJO}));
+        // El fondo elegido, si hay, con un velo oscuro para que los nombres se lean sobre cualquier imagen.
+        imagenFondo = new ImageView(this);
+        imagenFondo.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        imagenFondo.setVisibility(View.GONE);
+        raiz.addView(imagenFondo, new FrameLayout.LayoutParams(MATCH, MATCH));
+        veloFondo = new View(this);
+        veloFondo.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] {0x80000000, 0x33000000, 0x59000000}));
+        veloFondo.setVisibility(View.GONE);
+        raiz.addView(veloFondo, new FrameLayout.LayoutParams(MATCH, MATCH));
 
         LinearLayout columna = new LinearLayout(this);
         columna.setOrientation(LinearLayout.VERTICAL);
@@ -123,6 +140,8 @@ public class Inicio extends Activity implements TextWatcher {
         desplazable = new ScrollView(this);
         desplazable.setVerticalScrollBarEnabled(false);
         desplazable.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        // Que el contenido llegue hasta abajo: así todo el espacio vacío recibe el toque largo.
+        desplazable.setFillViewport(true);
         contenido = new LinearLayout(this);
         contenido.setOrientation(LinearLayout.VERTICAL);
         contenido.setPadding(0, px(2), 0, px(20));
@@ -132,6 +151,17 @@ public class Inicio extends Activity implements TextWatcher {
         raiz.addView(columna, new FrameLayout.LayoutParams(MATCH, MATCH));
         setContentView(raiz);
         pantallaCompleta();
+        cargarFondo();
+
+        // Mantener presionado un espacio vacío: ZYKRO escucha esta línea del registro y abre su
+        // ventana de fondos de pantalla. Los toques que ninguna app ni botón toma llegan hasta aquí.
+        View.OnLongClickListener fondos = vista -> {
+            Log.i(ETIQUETA, "fondos");
+            return true;
+        };
+        raiz.setOnLongClickListener(fondos);
+        columna.setOnLongClickListener(fondos);
+        contenido.setOnLongClickListener(fondos);
 
         // Apps instaladas, quitadas o actualizadas: se vuelve a armar la lista.
         cambios = new Cambios(this);
@@ -183,6 +213,9 @@ public class Inicio extends Activity implements TextWatcher {
 
     @Override
     protected void onDestroy() {
+        if (activa == this) {
+            activa = null;
+        }
         unregisterReceiver(cambios);
         fondo.shutdownNow();
         super.onDestroy();
@@ -215,6 +248,23 @@ public class Inicio extends Activity implements TextWatcher {
 
     @Override
     public void onTextChanged(CharSequence s, int inicio, int quitados, int puestos) {}
+
+    /** Dibuja el fondo elegido (ver {@link Fondo}) o, si no hay, el degradado de ZYKRO. */
+    void cargarFondo() {
+        File archivo = Fondo.archivo(this, Fondo.IMAGEN);
+        fondo.execute(() -> {
+            Bitmap imagen = archivo != null && archivo.exists() ? BitmapFactory.decodeFile(archivo.getPath()) : null;
+            principal.post(() -> {
+                if (isDestroyed()) {
+                    return;
+                }
+                imagenFondo.setImageBitmap(imagen);
+                int visible = imagen == null ? View.GONE : View.VISIBLE;
+                imagenFondo.setVisibility(visible);
+                veloFondo.setVisibility(visible);
+            });
+        });
+    }
 
     // -----------------------------------------------------------------------------------------
     // Apps
@@ -436,6 +486,7 @@ public class Inicio extends Activity implements TextWatcher {
         reloj.setTextColor(TEXTO);
         reloj.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         reloj.setPadding(px(12), 0, px(8), 0);
+        sombra(reloj);
         barra.addView(reloj);
 
         // ZYKRO escucha esta línea del registro y abre su panel de ajustes de Android, más cómodo en
@@ -589,7 +640,13 @@ public class Inicio extends Activity implements TextWatcher {
         if (negrita) {
             t.setTypeface(Typeface.DEFAULT_BOLD);
         }
+        sombra(t);
         return t;
+    }
+
+    /** Una sombra suave, para que el texto se lea sobre cualquier fondo de pantalla. */
+    private void sombra(TextView t) {
+        t.setShadowLayer(px(3), 0, px(1), 0x99000000);
     }
 
     private static GradientDrawable redondeado(int color, float radio) {

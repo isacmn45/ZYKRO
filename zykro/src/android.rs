@@ -51,6 +51,10 @@ pub struct Estado {
     pub notificaciones_cambiaron: bool,
     /// Entre los cambios hay una notificación que avisa: ZYKRO la muestra como emergente.
     pub notificacion_emergente: bool,
+    /// Se mantuvo presionado un espacio vacío del inicio: abrir la ventana de fondos de pantalla.
+    pub pedir_fondos: bool,
+    /// La pantalla de inicio cambió su fondo de pantalla.
+    pub fondo_cambio: bool,
 }
 
 pub type EstadoCompartido = Arc<Mutex<Estado>>;
@@ -59,6 +63,11 @@ pub type EstadoCompartido = Arc<Mutex<Estado>>;
 pub fn shell(orden: &str) -> Option<String> {
     let salida = Command::new("docker").args(["exec", CONTENEDOR, "sh", "-c", orden]).stderr(Stdio::null()).output().ok()?;
     salida.status.success().then(|| String::from_utf8_lossy(&salida.stdout).into_owned())
+}
+
+/// Copia un archivo de la laptop a Android.
+pub fn copiar_a(origen: &Path, destino: &str) -> bool {
+    docker(&["cp", &origen.to_string_lossy(), &format!("{CONTENEDOR}:{destino}")])
 }
 
 /// Copia un archivo o carpeta de Android a la laptop.
@@ -435,7 +444,8 @@ fn ocultar_teclado_en_pantalla() {
 }
 
 /// Escucha lo que la pantalla de inicio de ZYKRO pide por el registro de Android (etiqueta `ZYKRO`):
-/// abrir los ajustes de Android de ZYKRO al tocar su engrane, y avisar que cambiaron las notificaciones.
+/// abrir los ajustes de Android de ZYKRO al tocar su engrane o la ventana de fondos al mantener
+/// presionado un espacio vacío, y avisar que cambiaron las notificaciones o el fondo.
 pub fn vigilar_peticiones(ctx: egui::Context, estado: EstadoCompartido) {
     use std::io::{BufRead, BufReader};
     thread::Builder::new()
@@ -452,6 +462,8 @@ pub fn vigilar_peticiones(ctx: egui::Context, estado: EstadoCompartido) {
                 for linea in BufReader::new(hijo.stdout.take().unwrap()).lines().map_while(Result::ok) {
                     match linea.trim() {
                         "ajustes" => estado.lock().unwrap().pedir_ajustes = true,
+                        "fondos" => estado.lock().unwrap().pedir_fondos = true,
+                        "fondo" => estado.lock().unwrap().fondo_cambio = true,
                         "notificaciones" => estado.lock().unwrap().notificaciones_cambiaron = true,
                         "emergente" => {
                             let mut estado = estado.lock().unwrap();
