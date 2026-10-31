@@ -327,6 +327,19 @@ fn ocultar_teclado_en_pantalla() {
             let _ = Command::new(script).arg("ocultar").stdout(Stdio::null()).stderr(Stdio::null()).spawn();
         }
     }
+    // Con el teclado falso, Android avisa «Configura el teclado físico» (no tiene distribución
+    // elegida). No hay orden para bloquear ese canal, pero sí para posponer el aviso: un año. Si
+    // vuelve a salir mientras está pospuesto, sigue oculto.
+    thread::spawn(|| {
+        const AVISO: &str = "-1|android|19|null|1000";
+        for _ in 0..20 {
+            thread::sleep(Duration::from_secs(1));
+            if shell("cmd notification list").unwrap_or_default().lines().any(|l| l.trim() == AVISO) {
+                shell(&format!("cmd notification snooze --for 31536000000 '{AVISO}'"));
+                return;
+            }
+        }
+    });
 }
 
 /// Escucha lo que la pantalla de inicio de ZYKRO pide por el registro de Android (etiqueta `ZYKRO`):
