@@ -611,6 +611,11 @@ const BLUETOOTH_SIN_HAL: &str = "if [ \"$(getprop persist.bluetooth.disabled)\" 
     [ \"$(getprop bluetooth.service.enabled)\" = false ]; then \
     settings put global ble_scan_always_enabled 0; svc bluetooth disable; fi";
 
+/// Registro del teléfono con Google (checkin), sin el cual no se puede iniciar sesión («No tienes una
+/// conexión de red»). Google Play Services lo programa al arrancar, pero en Android 9 esa tarea se
+/// pierde y el aviso general lo bloquea Android: se le manda directo. Si ya está registrado, no hace nada.
+const REGISTRO_GOOGLE: &str = "am broadcast -a android.server.checkin.CHECKIN -p com.google.android.gms >/dev/null 2>&1";
+
 /// Lo de Configuración que se aplica en Android sin reiniciarlo: la operadora, el sonido al tocar y
 /// ADB (Android lo olvida al reiniciarse, así que se aplica cada vez que arranca).
 pub fn aplicar_preferencias(config: &config::Config) {
@@ -629,7 +634,7 @@ pub fn aplicar_preferencias(config: &config::Config) {
         );
     }
     let orden = format!(
-        "{BLUETOOTH_SIN_HAL}; {}; settings put system sound_effects_enabled {}; {adb}",
+        "{BLUETOOTH_SIN_HAL}; {REGISTRO_GOOGLE}; {}; settings put system sound_effects_enabled {}; {adb}",
         crate::telefono::orden_operadora(config.operadora.as_deref()),
         config.sonido_toques as u8
     );

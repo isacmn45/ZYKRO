@@ -56,6 +56,12 @@ cat >> "$S/build.prop" <<'FIN'
 # ZYKRO: traducción de apps ARM con Houdini.
 ro.dalvik.vm.isa.arm=x86
 ro.enable.native.bridge.exec=1
+
+# ZYKRO: la imagen de arranque de Java se usa donde está, sin moverla a una dirección al azar. Los
+# kernels nuevos alinean a 2 MB ciertos mapeos y no respetan la dirección que pide ART: Android de
+# 64 bits arrancaba sin imagen (todo su Java sin precompilar) y dex2oat no podía compilar las apps.
+dalvik.vm.extra-opts=-Xnorelocate
+dalvik.vm.dex2oat-flags=--runtime-arg -Xnorelocate
 FIN
 sed -e 's/^ro.vendor.product.cpu.abilist=.*/ro.vendor.product.cpu.abilist=x86_64,x86,armeabi-v7a,armeabi/' \
     -e 's/^ro.vendor.product.cpu.abilist32=.*/ro.vendor.product.cpu.abilist32=x86,armeabi-v7a,armeabi/' \
