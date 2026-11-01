@@ -68,12 +68,12 @@ fi
 echo "Listo."
 
 paso "Imagen de Android"
-# Android 9 de redroid (código abierto) con Houdini, Google Play y el servidor de ZYKRO. La primera
-# vez baja unos 900 MB. Si algo cambió, la imagen se actualiza y ZYKRO recrea el contenedor con ella
+# Android 13 de redroid (código abierto) con Houdini 14, Google Play y el servidor de ZYKRO. La primera
+# vez baja unos 1.1 GB. Si algo cambió, la imagen se actualiza y ZYKRO recrea el contenedor con ella
 # la próxima vez que lo abras (mismos datos).
-if ! docker image inspect redroid/redroid:9.0.0-latest >/dev/null 2>&1; then
-    echo "Se descarga Android 9 (redroid, unos 740 MB)."
-    docker pull redroid/redroid:9.0.0-latest
+if ! docker image inspect redroid/redroid:13.0.0-latest >/dev/null 2>&1; then
+    echo "Se descarga Android 13 (redroid, unos 840 MB)."
+    docker pull redroid/redroid:13.0.0-latest
 fi
 docker image inspect alpine:3.20 >/dev/null 2>&1 || docker pull -q alpine:3.20 >/dev/null
 sh imagen/construir.sh

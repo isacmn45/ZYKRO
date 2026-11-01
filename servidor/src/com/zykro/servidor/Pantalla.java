@@ -45,6 +45,10 @@ final class Pantalla {
             // «Segura» para que se vean también las ventanas protegidas (como en el teléfono).
             token = (IBinder) crear.invoke(null, "zykro", true);
         } catch (Exception e) {
+            token = null;
+        }
+        if (token == null) {
+            // Android 12 en adelante solo deja crearla a procesos del sistema: devuelve null.
             token = (IBinder) crear.invoke(null, "zykro", false);
         }
         Rect rect = new Rect(0, 0, ancho, alto);

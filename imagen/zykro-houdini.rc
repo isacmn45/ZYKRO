@@ -1,0 +1,5 @@
+# Houdini abre sus librerías de ARM (/system/lib64/arm64, /system/lib/arm y sus nb/) en el espacio de
+# librerías del sistema, que solo deja abrir rutas conocidas. Android genera esa lista al arrancar
+# (/linkerconfig/ld.config.txt): justo después, y antes de que arranque zygote, se le suman esas rutas.
+on post-fs-data
+    exec -- /system/bin/sh /system/etc/zykro-houdini.sh

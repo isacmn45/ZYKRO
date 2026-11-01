@@ -100,14 +100,16 @@ pub fn restaurar(origen: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Corre toybox de la imagen de Android con Android apagado. No hay `sh` fuera de Android: cada
+/// Corre toybox de la imagen de Android con Android apagado: sin /apex (lo monta Android al arrancar)
+/// no hay enlazador, así que se usa el del primer arranque, con sus bibliotecas. No hay `sh`: cada
 /// orden va sola. Devuelve si terminó bien.
 fn toybox(volumen: &str, imagen: &str, orden: &[&str], entrada: Option<std::fs::File>) -> Result<bool, String> {
     let mut docker = Command::new("docker");
     docker
         .args(["run", "--rm", "-i", "-v", &format!("{volumen}:/data")])
-        .args(["--entrypoint", "/system/bin/toybox"])
+        .args(["-e", "LD_LIBRARY_PATH=/system/lib64/bootstrap:/system/lib64", "--entrypoint", "/system/bin/bootstrap/linker64"])
         .arg(imagen)
+        .arg("/system/bin/toybox")
         .args(orden)
         .stdout(Stdio::null())
         .stderr(Stdio::null());

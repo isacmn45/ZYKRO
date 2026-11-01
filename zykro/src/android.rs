@@ -1,5 +1,5 @@
-//! Encender Android (un contenedor redroid con la imagen de ZYKRO, ver imagen/) y conectarse a su
-//! servidor (servidor/): la pantalla, los toques y el sonido.
+//! Encender Android (un contenedor redroid con la imagen de ZYKRO, Android 13, ver imagen/) y
+//! conectarse a su servidor (servidor/): la pantalla, los toques y el sonido.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -15,9 +15,9 @@ use crate::video::{self, Compartido};
 
 pub const CONTENEDOR: &str = "zykro-android";
 /// Imagen con la que se crea (la arma imagen/construir.sh).
-const IMAGEN: &str = "zykro-android:9";
+const IMAGEN: &str = "zykro-android:13";
 /// Volumen con los datos de Android: apps, partidas y sesiones.
-const VOLUMEN: &str = "zykro-android-datos";
+const VOLUMEN: &str = "zykro-android13-datos";
 /// Sockets del servidor de ZYKRO: en Android es /data/local/tmp/zykro.
 pub const SOCKETS: &str = "/tmp/zykro-android";
 /// Dónde escucha ADB en la laptop (Configuración › Avanzado lo enciende).
@@ -103,15 +103,19 @@ fn crear(android: &config::Android) -> Result<(), String> {
         return Err(format!("Falta la imagen de Android ({IMAGEN}): corre ./instalar.sh"));
     }
     let _ = std::fs::create_dir_all(SOCKETS);
-    crate::telefono::escribir(android.perfil).map_err(|e| e.to_string())?;
+    escribir_telefono(android.perfil)?;
     let telefono = crate::telefono::archivo();
     let mut run: Vec<String> = [
         "run", "-d", "--name", CONTENEDOR, "--privileged", "--security-opt", "label=disable", "--shm-size", "64m",
         "-v", &format!("{SOCKETS}:/data/local/tmp/zykro"), "-v", &format!("{VOLUMEN}:/data"),
-        "-v", &format!("{}:/product/build.prop:ro", telefono.display()),
+        "-v", &format!("{}:{PROPIEDADES_PRODUCTO}:ro", telefono.display()),
         "-p", &format!("{PUERTO_ADB}:5555"), "--entrypoint", "/init", IMAGEN,
         // GPU de la laptop; memfd en vez de ashmem (los kernels nuevos ya no lo traen).
         "androidboot.hardware=redroid", "androidboot.redroid_gpu_mode=host", "androidboot.use_memfd=1",
+        // SurfaceFlinger toma los cuadros sin esperar a que la GPU avise que terminó, con un búfer más:
+        // menos retraso. Y más memoria para las apps de Java (los juegos grandes la piden).
+        "debug.sf.latch_unsignaled=1", "ro.surface_flinger.max_frame_buffer_acquired_buffers=3",
+        "dalvik.vm.heapsize=512m", "dalvik.vm.heapgrowthlimit=256m",
     ]
     .into_iter()
     .map(String::from)
@@ -127,6 +131,24 @@ fn crear(android: &config::Android) -> Result<(), String> {
         return Err(String::from_utf8_lossy(&creado.stderr).trim().to_string());
     }
     Ok(())
+}
+
+/// Dónde lee Android las propiedades del producto (ver `telefono::archivo`).
+const PROPIEDADES_PRODUCTO: &str = "/system/product/etc/build.prop";
+
+/// Escribe el archivo del teléfono `perfil`, sobre las propiedades del producto de la imagen.
+fn escribir_telefono(perfil: Option<usize>) -> Result<(), String> {
+    // Toybox de la imagen con el enlazador del primer arranque (fuera de Android no hay /apex).
+    let base = Command::new("docker")
+        .args(["run", "--rm", "-e", "LD_LIBRARY_PATH=/system/lib64/bootstrap:/system/lib64"])
+        .args(["--entrypoint", "/system/bin/bootstrap/linker64", IMAGEN, "/system/bin/toybox", "cat", PROPIEDADES_PRODUCTO])
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !base.status.success() {
+        return Err(format!("no se pudieron leer las propiedades de {IMAGEN}"));
+    }
+    crate::telefono::escribir(perfil, &String::from_utf8_lossy(&base.stdout)).map_err(|e| e.to_string())
 }
 
 fn corriendo() -> bool {
@@ -236,7 +258,7 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
         // Si se borró el archivo del teléfono, Docker montaría una carpeta en su lugar.
         if !crate::telefono::archivo().exists() {
             let perfil = estado.lock().unwrap().config.android.perfil;
-            let _ = crate::telefono::escribir(perfil);
+            let _ = escribir_telefono(perfil);
         }
         if !docker(&["start", CONTENEDOR]) {
             return Err(std::io::Error::other("No se pudo encender Android. ¿Está corriendo Docker?"));
@@ -551,8 +573,9 @@ pub struct Tarea {
     pub paquete: String,
 }
 
-/// Apps abiertas, de la más reciente a la más vieja, sin el launcher. ZYKRO las saca de
-/// `am stack list` (en Android 9 cada app tiene su pila) y las ordena con `dumpsys activity recents`.
+/// Apps abiertas, de la más reciente a la más vieja, sin el launcher. Android no tiene vista de
+/// recientes sin Quickstep, así que ZYKRO las saca de `am stack list` y las ordena con
+/// `dumpsys activity recents`.
 pub fn tareas_abiertas() -> Vec<Tarea> {
     let consulta = "cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1; \
                     echo ===; am stack list; echo ===; dumpsys activity recents | grep 'Recent #'";
@@ -562,17 +585,16 @@ pub fn tareas_abiertas() -> Vec<Tarea> {
     let inicio = partes.next().unwrap_or("").trim().split('/').next().unwrap_or("").to_string();
     let (pila, recientes) = (partes.next().unwrap_or(""), partes.next().unwrap_or(""));
 
-    // Orden: "* Recent #0: TaskRecord{e6d0614 #8 A=com.android.gallery3d ...}" -> la tarea 8 es la
-    // más reciente.
+    // Orden: "* Recent #0: Task{1412083 #16 type=home ...}" -> la tarea 16 es la más reciente.
     let orden: Vec<u32> = recientes
         .lines()
-        .filter_map(|l| l.split("TaskRecord{").nth(1)?.split_whitespace().nth(1)?.strip_prefix('#')?.parse().ok())
+        .filter_map(|l| l.split("Task{").nth(1)?.split_whitespace().nth(1)?.strip_prefix('#')?.parse().ok())
         .collect();
 
     let mut tareas = Vec::new();
     let mut raiz = 0;
     for linea in pila.lines() {
-        if let Some(resto) = linea.strip_prefix("Stack id=") {
+        if let Some(resto) = linea.strip_prefix("RootTask id=") {
             raiz = resto.split_whitespace().next().and_then(|n| n.parse().ok()).unwrap_or(0);
         } else if let Some(resto) = linea.trim_start().strip_prefix("taskId=") {
             // "taskId=17: com.android.settings/com.android.settings.Settings bounds=..."
@@ -611,11 +633,6 @@ const BLUETOOTH_SIN_HAL: &str = "if [ \"$(getprop persist.bluetooth.disabled)\" 
     [ \"$(getprop bluetooth.service.enabled)\" = false ]; then \
     settings put global ble_scan_always_enabled 0; svc bluetooth disable; fi";
 
-/// Registro del teléfono con Google (checkin), sin el cual no se puede iniciar sesión («No tienes una
-/// conexión de red»). Google Play Services lo programa al arrancar, pero en Android 9 esa tarea se
-/// pierde y el aviso general lo bloquea Android: se le manda directo. Si ya está registrado, no hace nada.
-const REGISTRO_GOOGLE: &str = "am broadcast -a android.server.checkin.CHECKIN -p com.google.android.gms >/dev/null 2>&1";
-
 /// Lo de Configuración que se aplica en Android sin reiniciarlo: la operadora, el sonido al tocar y
 /// ADB (Android lo olvida al reiniciarse, así que se aplica cada vez que arranca).
 pub fn aplicar_preferencias(config: &config::Config) {
@@ -634,7 +651,7 @@ pub fn aplicar_preferencias(config: &config::Config) {
         );
     }
     let orden = format!(
-        "{BLUETOOTH_SIN_HAL}; {REGISTRO_GOOGLE}; {}; settings put system sound_effects_enabled {}; {adb}",
+        "{BLUETOOTH_SIN_HAL}; {}; settings put system sound_effects_enabled {}; {adb}",
         crate::telefono::orden_operadora(config.operadora.as_deref()),
         config.sonido_toques as u8
     );
@@ -685,7 +702,7 @@ fn recrear(nueva: &config::Android) -> Result<(), String> {
     let salida = Command::new("docker").args(["inspect", CONTENEDOR]).output().map_err(|e| e.to_string())?;
     let info: serde_json::Value = serde_json::from_slice(&salida.stdout).map_err(|e| e.to_string())?;
     let run = comando_run(&info, nueva)?;
-    crate::telefono::escribir(nueva.perfil).map_err(|e| e.to_string())?;
+    escribir_telefono(nueva.perfil)?;
 
     // Se guarda el contenedor viejo con otro nombre por si el nuevo no arranca.
     let respaldo = format!("{CONTENEDOR}-respaldo");

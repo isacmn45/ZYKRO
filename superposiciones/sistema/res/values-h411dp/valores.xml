@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SystemUI trae una barra de volumen propia para pantallas de 411 dp de alto o más (la de ZYKRO
+     mide 480): sin este valor, gana el suyo (137 dp). -->
+<resources>
+    <dimen name="volume_row_slider_height">96dp</dimen>
+</resources>

@@ -1,11 +1,13 @@
 package com.zykro.servidor;
 
 import android.app.Application;
+import android.content.AttributionSource;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
+import android.os.Process;
 import android.util.Log;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -13,11 +15,13 @@ import java.lang.reflect.Method;
 
 /**
  * app_process no es una app: no tiene contexto ni nombre de paquete, y AudioRecord los pide para
- * anotar quién graba. Se arma un ActivityThread con una Application falsa (como hace scrcpy).
- * Corriendo como root, Android no revisa más permisos para capturar el sonido.
+ * anotar quién graba. Se arma un ActivityThread con una Application que envuelve el contexto de
+ * sistema (como hace scrcpy): así lo que lo consulta (AppOpsManager en Android 13, por ejemplo)
+ * encuentra un PackageManager de verdad. Corriendo como root («root» es su nombre de paquete para
+ * Android), no se revisan más permisos para capturar el sonido.
  */
 final class Contexto {
-    static final String PAQUETE = "com.android.shell";
+    static final String PAQUETE = "root";
 
     private Contexto() {}
 
@@ -28,10 +32,13 @@ final class Contexto {
             constructor.setAccessible(true);
             Object hilo = constructor.newInstance();
             campo(clase, "sCurrentActivityThread").set(null, hilo);
+            campo(clase, "mSystemThread").setBoolean(hilo, true);
+            Method sistema = clase.getDeclaredMethod("getSystemContext");
+            sistema.setAccessible(true);
             Application aplicacion = new Application();
             Method adjuntar = ContextWrapper.class.getDeclaredMethod("attachBaseContext", Context.class);
             adjuntar.setAccessible(true);
-            adjuntar.invoke(aplicacion, new Falso());
+            adjuntar.invoke(aplicacion, new Falso((Context) sistema.invoke(hilo)));
             campo(clase, "mInitialApplication").set(hilo, aplicacion);
         } catch (Throwable e) {
             Log.w(Servidor.ETIQUETA, "no se pudo preparar el contexto", e);
@@ -64,10 +71,10 @@ final class Contexto {
         return grabadora;
     }
 
-    /** Lo único que AudioRecord le pregunta: el nombre del paquete. */
+    /** El contexto de sistema, pero con el nombre de paquete de root (lo que AudioRecord anota). */
     private static final class Falso extends ContextWrapper {
-        Falso() {
-            super(null);
+        Falso(Context sistema) {
+            super(sistema);
         }
 
         @Override
@@ -83,6 +90,12 @@ final class Contexto {
         @Override
         public Context getApplicationContext() {
             return this;
+        }
+
+        // Android 12 en adelante: AudioRecord toma de aquí quién graba.
+        @Override
+        public AttributionSource getAttributionSource() {
+            return new AttributionSource.Builder(Process.myUid()).setPackageName(PAQUETE).build();
         }
     }
 }

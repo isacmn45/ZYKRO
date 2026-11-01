@@ -3,9 +3,8 @@
 
 use std::path::PathBuf;
 
-/// Un teléfono: lo que leen las apps de `ro.product.*` y `ro.build.*`. Todos salieron con Android 9,
-/// como el de ZYKRO, y la huella es la de su versión real: Google Play revisa que coincida con un
-/// teléfono certificado.
+/// Un teléfono: lo que leen las apps de `ro.product.*` y `ro.build.*`. Todos salieron con Android 13,
+/// como el de ZYKRO, y la huella es la de una versión real.
 pub struct Perfil {
     pub nombre: &'static str,
     pub marca: &'static str,
@@ -16,35 +15,33 @@ pub struct Perfil {
     pub dispositivo: &'static str,
     pub huella: &'static str,
     pub descripcion: &'static str,
-    /// Parche de seguridad de esa versión (`ro.build.version.security_patch`).
-    pub parche: &'static str,
 }
 
 /// El primero es con el que se crea Android.
 #[rustfmt::skip]
 pub const PERFILES: [Perfil; 6] = [
-    Perfil { nombre: "Google Pixel 3", marca: "google", fabricante: "Google", modelo: "Pixel 3", producto: "blueline", dispositivo: "blueline",
-        huella: "google/blueline/blueline:9/PQ3A.190801.002/5670241:user/release-keys",
-        descripcion: "blueline-user 9 PQ3A.190801.002 5670241 release-keys", parche: "2019-08-01" },
-    Perfil { nombre: "Samsung Galaxy S10+", marca: "samsung", fabricante: "samsung", modelo: "SM-G975U", producto: "beyond2qlteue", dispositivo: "beyond2q",
-        huella: "samsung/beyond2qlteue/beyond2q:9/PPR1.180610.011/G975U1UEU1ASD3:user/release-keys",
-        descripcion: "beyond2qlteue-user 9 PPR1.180610.011 G975U1UEU1ASD3 release-keys", parche: "2019-03-01" },
-    Perfil { nombre: "ASUS ZenFone 6", marca: "asus", fabricante: "asus", modelo: "ASUS_I01WD", producto: "WW_I01WD", dispositivo: "ASUS_I01WD",
-        huella: "asus/WW_I01WD/ASUS_I01WD:9/PPR2.181005.003/16.1220.1909.193-0:user/release-keys",
-        descripcion: "WW_I01WD-user 9 PPR2.181005.003 16.1220.1909.193-0 release-keys", parche: "2019-09-01" },
-    Perfil { nombre: "OnePlus 7 Pro", marca: "OnePlus", fabricante: "OnePlus", modelo: "GM1913", producto: "OnePlus7Pro_EEA", dispositivo: "OnePlus7Pro",
-        huella: "OnePlus/OnePlus7Pro_EEA/OnePlus7Pro:9/PKQ1.190110.001/1907281556:user/release-keys",
-        descripcion: "OnePlus7Pro_EEA-user 9 PKQ1.190110.001 1907281556 release-keys", parche: "2019-08-01" },
-    Perfil { nombre: "Xiaomi Mi 9", marca: "Xiaomi", fabricante: "Xiaomi", modelo: "MI 9", producto: "cepheus_eea", dispositivo: "cepheus",
-        huella: "Xiaomi/cepheus_eea/cepheus:9/PKQ1.181121.001/V10.2.27.0.PFAEUXM:user/release-keys",
-        descripcion: "cepheus_eea-user 9 PKQ1.181121.001 V10.2.27.0.PFAEUXM release-keys", parche: "2019-06-01" },
-    Perfil { nombre: "Xiaomi Redmi Note 7", marca: "xiaomi", fabricante: "Xiaomi", modelo: "Redmi Note 7", producto: "lavender", dispositivo: "lavender",
-        huella: "xiaomi/lavender/lavender:9/PKQ1.180904.001/V11.0.5.0.PFGMIXM:user/release-keys",
-        descripcion: "lavender-user 9 PKQ1.180904.001 V11.0.5.0.PFGMIXM release-keys", parche: "2020-01-05" },
+    Perfil { nombre: "Sony Xperia 1 V", marca: "Sony", fabricante: "Sony", modelo: "XQ-DQ72", producto: "XQ-DQ72", dispositivo: "XQ-DQ72",
+        huella: "Sony/XQ-DQ72/XQ-DQ72:13/67.0.A.4.51/067000A004005100:user/release-keys",
+        descripcion: "XQ-DQ72-user 13 67.0.A.4.51 067000A004005100 release-keys" },
+    Perfil { nombre: "Samsung Galaxy S23 Ultra", marca: "samsung", fabricante: "samsung", modelo: "SM-S918B", producto: "dm3qxxx", dispositivo: "dm3q",
+        huella: "samsung/dm3qxxx/dm3q:13/TP1A.220624.014/S918BXXU1AWBD:user/release-keys",
+        descripcion: "dm3qxxx-user 13 TP1A.220624.014 S918BXXU1AWBD release-keys" },
+    Perfil { nombre: "ASUS ROG Phone 7", marca: "asus", fabricante: "asus", modelo: "ASUS_AI2205", producto: "WW_AI2205", dispositivo: "ASUS_AI2205",
+        huella: "asus/WW_AI2205/ASUS_AI2205:13/TKQ1.221013.002/33.0610.2810.98:user/release-keys",
+        descripcion: "WW_AI2205-user 13 TKQ1.221013.002 33.0610.2810.98 release-keys" },
+    Perfil { nombre: "OnePlus 11", marca: "OnePlus", fabricante: "OnePlus", modelo: "CPH2449", producto: "CPH2449", dispositivo: "OP594DL1",
+        huella: "OnePlus/CPH2449/OP594DL1:13/TP1A.220905.001/R.1038728_2_1:user/release-keys",
+        descripcion: "CPH2449-user 13 TP1A.220905.001 R.1038728_2_1 release-keys" },
+    Perfil { nombre: "Xiaomi 13 Pro", marca: "Xiaomi", fabricante: "Xiaomi", modelo: "2210132G", producto: "nuwa_global", dispositivo: "nuwa",
+        huella: "Xiaomi/nuwa_global/nuwa:13/TKQ1.221114.001/V14.0.4.0.TMBMIXM:user/release-keys",
+        descripcion: "nuwa_global-user 13 TKQ1.221114.001 V14.0.4.0.TMBMIXM release-keys" },
+    Perfil { nombre: "Google Pixel 7 Pro", marca: "google", fabricante: "Google", modelo: "Pixel 7 Pro", producto: "cheetah", dispositivo: "cheetah",
+        huella: "google/cheetah/cheetah:13/TQ3A.230901.001/10750268:user/release-keys",
+        descripcion: "cheetah-user 13 TQ3A.230901.001 10750268 release-keys" },
 ];
 
 /// Las particiones que también anuncian el teléfono (`ro.product.<particion>.*`).
-const PARTICIONES: [&str; 5] = ["", "system.", "vendor.", "product.", "odm."];
+const PARTICIONES: [&str; 6] = ["", "system.", "vendor.", "product.", "odm.", "system_ext."];
 
 impl Perfil {
     /// Las propiedades de Android con este teléfono.
@@ -61,7 +58,6 @@ impl Perfil {
         args.push(("ro.build.flavor".into(), format!("{}-user", self.producto)));
         args.push(("ro.build.description".into(), self.descripcion.to_string()));
         args.push(("ro.build.fingerprint".into(), self.huella.to_string()));
-        args.push(("ro.build.version.security_patch".into(), self.parche.to_string()));
         // La imagen es de pruebas (userdebug, test-keys): un teléfono de verdad dice user y release-keys.
         args.push(("ro.build.type".into(), "user".into()));
         args.push(("ro.build.tags".into(), "release-keys".into()));
@@ -69,9 +65,10 @@ impl Perfil {
     }
 }
 
-/// Archivo con las propiedades del teléfono elegido. Android lo ve como /product/build.prop y lo lee
-/// antes que las suyas. No van como argumentos de arranque porque redroid los corta en el primer
-/// espacio («Pixel 3» quedaba «Pixel»).
+/// Archivo con las propiedades del producto y, al final, las del teléfono elegido. Android lo ve como
+/// /product/etc/build.prop, que lee después de las demás particiones: lo que pone ahí manda (y de ahí
+/// saca también `ro.product.model`). No van como argumentos de arranque porque redroid los corta en el
+/// primer espacio («Pixel 7 Pro» quedaba «Pixel»).
 pub fn archivo() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
@@ -79,12 +76,14 @@ pub fn archivo() -> PathBuf {
         .join("zykro/telefono.prop")
 }
 
-/// Escribe el archivo del teléfono `perfil` (vacío con `None`: Android se presenta como es).
-pub fn escribir(perfil: Option<usize>) -> std::io::Result<()> {
-    let texto: String = perfil
-        .and_then(|i| PERFILES.get(i))
-        .map(|p| p.propiedades().into_iter().map(|(k, v)| format!("{k}={v}\n")).collect())
-        .unwrap_or_default();
+/// Escribe el archivo con las propiedades del producto de la imagen (`base`) y las del teléfono
+/// `perfil` (con `None`, solo las de la imagen: Android se presenta como es).
+pub fn escribir(perfil: Option<usize>, base: &str) -> std::io::Result<()> {
+    let mut texto = base.to_string();
+    if let Some(p) = perfil.and_then(|i| PERFILES.get(i)) {
+        texto.push_str("\n# ZYKRO: teléfono elegido en Configuración › Teléfono.\n");
+        texto.extend(p.propiedades().into_iter().map(|(k, v)| format!("{k}={v}\n")));
+    }
     let ruta = archivo();
     if let Some(carpeta) = ruta.parent() {
         std::fs::create_dir_all(carpeta)?;
