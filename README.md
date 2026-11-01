@@ -88,13 +88,19 @@ teclas y una puntería que se siente como la de BlueStacks. Todo lo que hay entr
 
 ## Requisitos
 
-- Linux con KDE Plasma en Wayland (probado en CachyOS con Plasma 6).
-- Un kernel con binder (`CONFIG_ANDROID_BINDERFS`), como el de CachyOS.
-- Docker, con tu usuario en los grupos `docker` e `input`.
-- Rust (`cargo`) y `gcc` para compilar.
-- Unos 5 GB libres para la imagen de Android y tus apps.
-- Probado con una GPU Intel (Iris Xe). Con el driver propietario de NVIDIA, ZYKRO todavía no puede
-  mostrar la imagen.
+- Linux con KDE Plasma 6 en Wayland. Probado en CachyOS; otros escritorios y distribuciones no se han
+  probado.
+- Un kernel con binder (`CONFIG_ANDROID_BINDERFS`), como el de CachyOS. En Ubuntu y Debian viene como
+  módulo en el paquete `linux-modules-extra-$(uname -r)`: instálalo y `preparar-android.sh` lo carga.
+- La GPU:
+  - **Intel:** probada (Iris Xe).
+  - **AMD:** sin probar; Android usa Mesa, así que debería funcionar.
+  - **NVIDIA con su driver propietario:** ZYKRO todavía no puede mostrar la imagen.
+- Docker, con tu usuario en los grupos `docker` e `input` (`sudo usermod -aG docker,input $USER` y
+  volver a iniciar sesión).
+- Rust (`cargo`), `gcc`, `git` y `curl`.
+- PipeWire con `pipewire-pulse`, para el sonido.
+- Unos 5 GB libres. La primera instalación baja cerca de 1.1 GB.
 
 ## Instalar
 
@@ -106,7 +112,8 @@ Compila ZYKRO, lo copia a `~/.local/bin`, crea su ícono en el menú y prepara A
 `preparar-android.sh`:
 
 1. Activa Docker si no está corriendo.
-2. Monta los dispositivos `binder` en cada arranque (servicio `zykro-binderfs`).
+2. Monta los dispositivos `binder` en cada arranque (servicio `zykro-binderfs`); si tu kernel lo trae
+   como módulo, también carga `binder_linux`.
 3. Carga `uinput` en cada arranque.
 4. Descarga Android 13 de redroid (unos 840 MB) y arma la imagen de ZYKRO con `imagen/construir.sh`:
    baja una vez Houdini 14 y MindTheGapps (unos 270 MB, verificados con su SHA-256) y les suma el
@@ -138,6 +145,20 @@ Para copiar también nuestro mapeo de Free Fire (reemplaza el que tengas):
 
 No se incluye ningún binario de Houdini (Intel), Google ni BlueStacks: `imagen/construir.sh` baja Houdini
 y Google Play de sus fuentes públicas.
+
+## Avisos
+
+- **Juegos con antitrampas:** Free Fire usa el antitrampas de Tencent (ACE), que revisa el teléfono.
+  Este Android se presenta como un teléfono normal, sin root ni depuración, pero no hay garantía de que
+  todos los juegos lo acepten. Una versión anterior de ZYKRO, con Android 9 de depuración, hizo que se
+  suspendiera una cuenta al entrar a una partida. Antes de usar tu cuenta principal, pruébalo con una
+  que no te importe perder. Usarlo puede ir contra los términos de cada juego: el riesgo es tuyo.
+- **Houdini es de Intel:** es software propietario y no viene en este repositorio. `imagen/construir.sh`
+  lo baja del repositorio público
+  [supremegamers/vendor_intel_proprietary_houdini](https://github.com/supremegamers/vendor_intel_proprietary_houdini)
+  (el mismo que usa Waydroid con waydroid_script) y le aplica el parche de Free Fire. El propio Houdini
+  avisa al arrancar que su uso requiere una licencia de Intel. Las apps de Google (MindTheGapps)
+  también son propietarias.
 
 ## Si venías de la versión con SwagPlayer
 

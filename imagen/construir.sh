@@ -11,7 +11,7 @@ mkdir -p "$CACHE" descargas
 bajar() { # archivo url sha256
     if ! echo "$3  $CACHE/$1" | sha256sum -c --status 2>/dev/null; then
         echo "Descargando $1…"
-        curl -fL --retry 3 -o "$CACHE/$1.parcial" "$2"
+        curl -fsSL --retry 3 -o "$CACHE/$1.parcial" "$2"
         echo "$3  $CACHE/$1.parcial" | sha256sum -c --status || { echo "La descarga de $1 no coincide"; exit 1; }
         mv "$CACHE/$1.parcial" "$CACHE/$1"
     fi

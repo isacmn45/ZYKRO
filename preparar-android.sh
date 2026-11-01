@@ -28,14 +28,19 @@ paso "Binder (Android lo necesita para arrancar)"
 if [ -e /dev/binderfs/binder ]; then
     echo "Listo."
 else
+    # Algunos kernels (Ubuntu, Debian) lo traen como módulo: se carga ahora y en cada arranque.
+    if ! grep -qw binder /proc/filesystems && modinfo binder_linux >/dev/null 2>&1; then
+        echo "Se carga el módulo binder_linux, también en cada arranque (pide tu contraseña)."
+        echo binder_linux | sudo tee /etc/modules-load.d/zykro-binder.conf >/dev/null
+        sudo modprobe binder_linux
+    fi
     if ! grep -qw binder /proc/filesystems; then
-        echo "Tu kernel no trae binder (CONFIG_ANDROID_BINDERFS). Usa un kernel que lo tenga, como el de CachyOS."
+        echo "Tu kernel no trae binder (CONFIG_ANDROID_BINDERFS). Usa un kernel que lo tenga, como el de CachyOS;"
+        echo "en Ubuntu y Debian viene como módulo en el paquete linux-modules-extra-$(uname -r)."
         exit 1
     fi
-    if systemctl cat swagplayer-binderfs.service >/dev/null 2>&1; then
-        servicio=swagplayer-binderfs.service
-    else
-        servicio=zykro-binderfs.service
+    servicio=zykro-binderfs.service
+    if ! systemctl cat $servicio >/dev/null 2>&1; then
         echo "Se instala el servicio $servicio, que monta binder en cada arranque (pide tu contraseña)."
         sudo tee /etc/systemd/system/$servicio >/dev/null <<'FIN'
 [Unit]
