@@ -3,6 +3,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -130,6 +131,7 @@ fn crear(android: &config::Android) -> Result<(), String> {
     if !creado.status.success() {
         return Err(String::from_utf8_lossy(&creado.stderr).trim().to_string());
     }
+    RECIEN_ENCENDIDO.store(true, Ordering::Relaxed);
     Ok(())
 }
 
@@ -263,6 +265,7 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
         if !docker(&["start", CONTENEDOR]) {
             return Err(std::io::Error::other("No se pudo encender Android. ¿Está corriendo Docker?"));
         }
+        RECIEN_ENCENDIDO.store(true, Ordering::Relaxed);
     }
 
     mensaje(estado, Etapa::Arrancar, "Esperando a Android…");
@@ -318,10 +321,18 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
     if config.accesos_directos {
         thread::spawn(|| crate::accesos::sincronizar(true));
     }
-    // Abierto desde un acceso directo de una app: se abre en cuanto Android está listo.
-    if let Some(paquete) = ABRIR_AL_INICIAR.lock().unwrap().take() {
-        thread::spawn(move || abrir_app(&paquete));
-    }
+    // Abierto desde un acceso directo de una app: se abre en cuanto Android está listo (después de
+    // cerrar las que se abrieron solas).
+    let recien = RECIEN_ENCENDIDO.swap(false, Ordering::Relaxed);
+    let abrir = ABRIR_AL_INICIAR.lock().unwrap().take();
+    thread::spawn(move || {
+        if recien {
+            detener_apps();
+        }
+        if let Some(paquete) = abrir {
+            abrir_app(&paquete);
+        }
+    });
 
     let ctx2 = ctx.clone();
     video::recibir_cuadros(socket_video, destino.clone(), move || ctx2.request_repaint())
@@ -706,7 +717,7 @@ fn recrear(nueva: &config::Android) -> Result<(), String> {
 
     // Se guarda el contenedor viejo con otro nombre por si el nuevo no arranca.
     let respaldo = format!("{CONTENEDOR}-respaldo");
-    docker(&["stop", "-t", "5", CONTENEDOR]);
+    let _ = Command::new("sh").args(["-c", &orden_apagar()]).stdout(Stdio::null()).stderr(Stdio::null()).status();
     docker(&["rm", "-f", &respaldo]);
     if !docker(&["rename", CONTENEDOR, &respaldo]) {
         return Err("no se pudo apartar el contenedor actual".into());
@@ -718,6 +729,7 @@ fn recrear(nueva: &config::Android) -> Result<(), String> {
         return Err(String::from_utf8_lossy(&creado.stderr).trim().to_string());
     }
     docker(&["rm", "-f", &respaldo]);
+    RECIEN_ENCENDIDO.store(true, Ordering::Relaxed);
     Ok(())
 }
 
@@ -828,13 +840,26 @@ mod pruebas {
     }
 }
 
+/// Apaga Android desde su `init`, como un teléfono: en menos de un segundo no queda nada abierto.
+/// `docker stop` espera a que termine, o lo mata a los 5 segundos si Android no respondiera (la señal
+/// de Docker, `init` la ignora).
+fn orden_apagar() -> String {
+    format!("timeout 10 docker exec {CONTENEDOR} setprop sys.powerctl shutdown; docker stop -t 5 {CONTENEDOR}")
+}
+
 /// Apaga Android al cerrar la ventana, sin esperar a que termine.
 pub fn apagar() {
-    let _ = Command::new("docker")
-        .args(["stop", "-t", "5", CONTENEDOR])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+    let _ = Command::new("sh").args(["-c", &orden_apagar()]).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+}
+
+/// Si ZYKRO acaba de encender Android: al conectarse cierra las apps que se abrieron solas.
+static RECIEN_ENCENDIDO: AtomicBool = AtomicBool::new(false);
+
+/// Detiene las apps instaladas, menos la pantalla de inicio, como «Forzar detención». Al encender,
+/// Android abre en segundo plano las que piden el aviso de encendido (Free Fire, por ejemplo); ya
+/// detenidas, no se lo vuelve a mandar hasta que se abran.
+fn detener_apps() {
+    shell(&format!("for p in $(pm list packages -3); do p=${{p#package:}}; [ $p = {INICIO} ] || am force-stop $p; done"));
 }
 
 pub fn instalar_apk(estado: EstadoCompartido) {
