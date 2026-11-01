@@ -215,6 +215,15 @@ pub fn iniciar(frame: &eframe::Frame) -> bool {
     RITMO.with_borrow(Option::is_some)
 }
 
+/// Al cerrar: se suelta sin destruir nada de Wayland. La conexión y la superficie son de winit, que
+/// las cierra al desarmar la ventana; si `Ritmo` se destruyera después (al salir el proceso, con
+/// las variables del hilo), su cola tocaría una conexión ya cerrada y ZYKRO se caería al cerrarse.
+pub fn terminar() {
+    if let Some(ritmo) = RITMO.take() {
+        std::mem::forget(ritmo);
+    }
+}
+
 /// Pide el aviso de KWin para el cuadro que se está dibujando. Va en cada cuadro, antes de entregarlo;
 /// `tiempos` dice, si trae un cuadro nuevo de Android, cuándo lo avisó el servidor y cuándo quedó listo.
 pub fn enviar(tiempos: Option<(Instant, Instant)>) {

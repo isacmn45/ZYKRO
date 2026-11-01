@@ -1558,6 +1558,7 @@ impl eframe::App for Zykro {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        ritmo::terminar();
         self.cerrar_menu();
         gamepad::limpiar_nodos();
         rendimiento::restaurar();
