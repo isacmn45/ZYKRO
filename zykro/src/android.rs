@@ -326,6 +326,7 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
     let recien = RECIEN_ENCENDIDO.swap(false, Ordering::Relaxed);
     let abrir = ABRIR_AL_INICIAR.lock().unwrap().take();
     thread::spawn(move || {
+        shell(SIN_PREDICCION);
         if recien {
             detener_apps();
         }
@@ -854,6 +855,14 @@ pub fn apagar() {
 
 /// Si ZYKRO acaba de encender Android: al conectarse cierra las apps que se abrieron solas.
 static RECIEN_ENCENDIDO: AtomicBool = AtomicBool::new(false);
+
+/// Sin la predicción de toques de Android («resampling»): cada cuadro, la app recibe el dedo 5 ms
+/// atrasado y, si no llegó un toque nuevo, adivina hacia dónde siguió. Con los toques del mouse (uno
+/// por reporte, con la hora en milisegundos enteros) la adivinanza se pasaba al frenar y luego volvía:
+/// la mira temblaba al subirla para un tiro a la cabeza. Así la app ve siempre el último toque.
+/// La imagen ya la trae apagada (`armar.sh`); esto es para contenedores de antes, y solo vale para
+/// las apps que se abran después (por eso va antes de abrir cualquiera).
+const SIN_PREDICCION: &str = "[ -n \"$(getprop ro.input.resampling)\" ] || setprop ro.input.resampling 0";
 
 /// Detiene las apps instaladas, menos la pantalla de inicio, como «Forzar detención». Al encender,
 /// Android abre en segundo plano las que piden el aviso de encendido (Free Fire, por ejemplo); ya

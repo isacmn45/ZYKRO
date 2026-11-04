@@ -54,9 +54,12 @@ de_usuario /tmp/props/vendor.prop | sed -e 's/^ro\.dalvik\.vm\.native\.bridge=.*
 echo 'ro.enable.native.bridge.exec64=1' >> "$V/build.prop"
 # Lo demás que no hay en el contenedor (Bluetooth, NFC, el asistente del primer arranque) apagado, y
 # SurfaceFlinger sin desenfoques entre ventanas ni estadísticas: lo mismo que tenía la imagen de SwagPlayer.
+# Y sin la predicción de toques: con los del mouse de ZYKRO hacía temblar la mira (ver SIN_PREDICCION en
+# zykro/src/android.rs).
 cat >> "$S/build.prop" <<'FIN'
 
 # ZYKRO
+ro.input.resampling=0
 persist.bluetooth.disabled=true
 ro.nfc.port=disabled
 ro.setupwizard.mode=DISABLED
