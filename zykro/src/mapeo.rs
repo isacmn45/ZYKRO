@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, PointerButton, Vec2};
@@ -1101,7 +1102,27 @@ pub const BOTONES_MANDO: [(&str, &str); 12] = [
     ("GamepadRightThumb", "R3"),
 ];
 
-/// Un botón del mando como se muestra: «A», «LB», «Cruceta ↑», «Joystick izq. ←».
+/// Los mismos botones como se llaman en un mando de PlayStation (✕ ○ □ △ con los íconos de Phosphor).
+const BOTONES_PLAYSTATION: [(&str, &str); 12] = [
+    ("GamepadA", egui_phosphor::regular::X),
+    ("GamepadB", egui_phosphor::regular::CIRCLE),
+    ("GamepadX", egui_phosphor::regular::SQUARE),
+    ("GamepadY", egui_phosphor::regular::TRIANGLE),
+    ("GamepadLeftShoulder", "L1"),
+    ("GamepadRightShoulder", "R1"),
+    ("GamepadLTrigger", "L2"),
+    ("GamepadRTrigger", "R2"),
+    ("GamepadBack", "Share"),
+    ("GamepadStart", "Options"),
+    ("GamepadLeftThumb", "L3"),
+    ("GamepadRightThumb", "R3"),
+];
+
+/// El último mando que se conectó es de PlayStation: los botones se muestran con sus nombres.
+pub static ESTILO_PLAYSTATION: AtomicBool = AtomicBool::new(false);
+
+/// Un botón del mando como se muestra: «A», «LB», «Cruceta ↑», «Joystick izq. ←» (o «L1»… en uno de
+/// PlayStation).
 fn etiqueta_boton(boton: &str) -> String {
     use egui_phosphor::regular::{ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT, ARROW_UP};
     let flecha = |d: &str| match d {
@@ -1115,7 +1136,8 @@ fn etiqueta_boton(boton: &str) -> String {
             return format!("{nombre} {}", flecha(direccion));
         }
     }
-    BOTONES_MANDO.iter().find(|(n, _)| *n == boton).map_or_else(|| boton.trim_start_matches("Gamepad").to_string(), |(_, e)| e.to_string())
+    let nombres = if ESTILO_PLAYSTATION.load(Ordering::Relaxed) { &BOTONES_PLAYSTATION } else { &BOTONES_MANDO };
+    nombres.iter().find(|(n, _)| *n == boton).map_or_else(|| boton.trim_start_matches("Gamepad").to_string(), |(_, e)| e.to_string())
 }
 
 /// Un botón o una combinación del mando (`GamepadA`, `GamepadLeftShoulder + GamepadX`).

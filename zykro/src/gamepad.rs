@@ -248,6 +248,8 @@ fn repetir(ruta: &PathBuf) -> std::io::Result<()> {
     let nombre = texto(fd, eviocgname);
     let mut id = Id::default();
     ioctl(fd, EVIOCGID, &mut id);
+    // Sony: los botones se muestran como en un mando de PlayStation.
+    crate::mapeo::ESTILO_PLAYSTATION.store(id.fabricante == 0x054c, Ordering::Relaxed);
     let teclas = bits(fd, EV_KEY, KEY_MAX);
     let ejes = bits(fd, EV_ABS, ABS_MAX);
     let vibra = VIBRACION.load(Ordering::Relaxed) && !bits(fd, EV_FF, FF_MAX).is_empty();
