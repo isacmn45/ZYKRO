@@ -953,9 +953,11 @@ impl Zykro {
             }
         }
         self.mods_previos = mods;
+        // Escribiendo en un campo (el color de la mira, un script), Supr y las letras son del campo.
+        let escribiendo = ctx.egui_wants_keyboard_input() && !self.editor.esperando_tecla();
         for evento in eventos {
             match evento {
-                Event::Key { key, pressed: true, repeat: false, .. } => {
+                Event::Key { key, pressed: true, repeat: false, .. } if !escribiendo => {
                     if let Some(nombre) = mapeo::nombre_tecla(key) {
                         self.editor.tecla(&nombre);
                     }

@@ -3,10 +3,13 @@
 //! propiedades (las mismas que los «ajustes avanzados» de BlueStacks) y tener varios esquemas de
 //! controles por juego.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 
-use eframe::egui::{self, Align, Align2, Color32, FontId, Id, LayerId, Layout, Order, Painter, Pos2, Rect, RichText, Sense, Stroke, Vec2};
+use eframe::egui::{
+    self, Align, Align2, Color32, FontId, Id, LayerId, Layout, Order, Painter, Pos2, Rect, RichText, Sense, Stroke, TextureHandle, TextureOptions, Vec2,
+};
 use egui_phosphor::regular as ic;
 use serde_json::Map;
 
@@ -32,6 +35,8 @@ pub enum Asa {
     Disparo,
     /// El botón del ojo de «mirar alrededor» dentro de la puntería.
     Ojo,
+    /// El punto de mira de la puntería.
+    Mira,
 }
 
 impl Asa {
@@ -40,6 +45,11 @@ impl Asa {
             Asa::Nodo(i) | Asa::Punto(i, _) | Asa::Tecla(i, _) | Asa::Radio(i) => Some(i),
             _ => None,
         }
+    }
+
+    /// Una parte del control de puntería: sus ajustes van en su propia ventana.
+    fn de_apuntar(self) -> bool {
+        matches!(self, Asa::Apuntar | Asa::Disparo | Asa::Ojo | Asa::Mira)
     }
 }
 
@@ -427,7 +437,8 @@ pub fn dibujar(p: &Painter, rect: Rect, mapa: &Mapa, opacidad: f32, elegida: Opt
         }
     }
 
-    if let Some(raton) = &mapa.raton {
+    // Al jugar, «Mostrar teclas en pantalla» de la puntería decide si se ven sus insignias.
+    if let Some(raton) = mapa.raton.as_ref().filter(|r| editando || r.mostrar) {
         let pos = a_pantalla(rect, raton.inicio);
         icono_insignia(p, &e, pos, ic::CROSSHAIR, Some(&etiqueta(&mapa.cambio)), es(Asa::Apuntar));
         zonas.push(Zona { asa: Asa::Apuntar, centro: pos, radio: r * 1.2 });
@@ -441,15 +452,61 @@ pub fn dibujar(p: &Painter, rect: Rect, mapa: &Mapa, opacidad: f32, elegida: Opt
             icono_insignia(p, &e, pos, ic::EYE, raton.mirada_tecla.as_deref().map(etiqueta).as_deref(), es(Asa::Ojo));
             zonas.push(Zona { asa: Asa::Ojo, centro: pos, radio: r * 1.2 });
         }
+        // En el editor la mira se ve donde va y se arrastra, como en BlueStacks.
+        if editando && raton.mira.enabled {
+            let pos = a_pantalla(rect, Punto::nuevo(raton.mira.x, raton.mira.y));
+            dibujar_mira(p, rect, &raton.mira);
+            if es(Asa::Mira) {
+                p.circle_stroke(pos, r * 1.4, Stroke::new(2.0, ACENTO));
+            }
+            zonas.push(Zona { asa: Asa::Mira, centro: pos, radio: r * 1.4 });
+        }
     }
     zonas
 }
 
-/// El punto de mira en el centro de la imagen, mientras se apunta.
+/// Texturas de los puntos de mira personalizados, por archivo (`None` si no se pudo leer).
+static IMAGENES_MIRA: Mutex<Vec<(String, Option<TextureHandle>)>> = Mutex::new(Vec::new());
+
+fn imagen_mira(ctx: &egui::Context, nombre: &str) -> Option<TextureHandle> {
+    let mut lista = IMAGENES_MIRA.lock().unwrap();
+    if let Some((_, textura)) = lista.iter().find(|(n, _)| n == nombre) {
+        return textura.clone();
+    }
+    let imagen = crate::ajustes_android::leer_png(&mapeo::carpeta_miras().join(nombre));
+    let textura = imagen.map(|i| ctx.load_texture(format!("mira-{nombre}"), i, TextureOptions::LINEAR));
+    lista.push((nombre.to_string(), textura.clone()));
+    textura
+}
+
+/// Copia la imagen elegida para la mira (PNG o JPG de hasta 5 MB, como en BlueStacks) a
+/// `carpeta_miras` como PNG y devuelve su nombre.
+fn guardar_imagen_mira(origen: &Path) -> Result<String, String> {
+    let tamano = std::fs::metadata(origen).map_err(|e| e.to_string())?.len();
+    if tamano > 5 * 1024 * 1024 {
+        return Err("La imagen pasa de 5 MB".into());
+    }
+    let carpeta = mapeo::carpeta_miras();
+    std::fs::create_dir_all(&carpeta).map_err(|e| e.to_string())?;
+    let nombre = format!("{}.png", origen.file_stem().map_or("mira".into(), |s| s.to_string_lossy()));
+    let destino = carpeta.join(&nombre);
+    if origen.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")) {
+        std::fs::copy(origen, &destino).map_err(|e| e.to_string())?;
+    } else if !Command::new("magick").arg(origen).arg(&destino).status().is_ok_and(|s| s.success()) {
+        return Err("Para usar un JPG hace falta ImageMagick; un PNG funciona siempre".into());
+    }
+    if crate::ajustes_android::leer_png(&destino).is_none() {
+        return Err("No se pudo leer la imagen".into());
+    }
+    IMAGENES_MIRA.lock().unwrap().retain(|(n, _)| n != &nombre);
+    Ok(nombre)
+}
+
+/// El punto de mira, mientras se apunta: donde diga `mira` (al centro de fábrica).
 pub fn dibujar_mira(p: &Painter, rect: Rect, mira: &mapeo::Mira) {
-    let c = rect.center();
+    let c = a_pantalla(rect, Punto::nuevo(mira.x, mira.y));
     let color = mira.color32();
-    let t = (rect.height() / 720.0).max(0.6) * mira.size.clamp(1.0, 5.0);
+    let t = (rect.height() / 720.0).max(0.6) * mira.size.max(1.0);
     let trazo = Stroke::new(1.6 * t.sqrt(), color);
     let sombra = Stroke::new(1.6 * t.sqrt() + 1.5, Color32::from_black_alpha((90.0 * mira.opacity / 100.0) as u8));
     let brazo = |p: &Painter, trazo: Stroke| {
@@ -474,6 +531,17 @@ pub fn dibujar_mira(p: &Painter, rect: Rect, mira: &mapeo::Mira) {
             brazo(p, sombra);
             brazo(p, trazo);
             p.circle_filled(c, 1.6 * t, color);
+        }
+        // La imagen en un cuadro de 36 px por cada punto de tamaño (en una ventana de 1000 de alto),
+        // como el ícono de BlueStacks, y sin color: el de la imagen.
+        EstiloMira::Imagen => {
+            if let Some(textura) = imagen_mira(p.ctx(), &mira.image) {
+                let lado = 36.0 * mira.size.max(1.0) * (rect.height() / 1000.0).max(0.6);
+                let tam = textura.size_vec2();
+                let caja = Rect::from_center_size(c, tam * (lado / tam.x.max(tam.y)));
+                let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+                p.image(textura.id(), caja, uv, Color32::WHITE.gamma_multiply((mira.opacity / 100.0).clamp(0.0, 1.0)));
+            }
         }
     }
 }
@@ -502,6 +570,10 @@ pub struct Editor {
     /// Nombre del esquema nuevo que se está escribiendo.
     nombre_esquema: Option<String>,
     aviso: Option<String>,
+    /// La ventana «Ajustes de apuntar, desplazar y disparar» está abierta.
+    ajustes_apuntar: bool,
+    /// Por qué no se pudo usar la imagen elegida para la mira.
+    error_mira: Option<String>,
 }
 
 impl Editor {
@@ -519,6 +591,8 @@ impl Editor {
             esquemas: Vec::new(),
             nombre_esquema: None,
             aviso: None,
+            ajustes_apuntar: false,
+            error_mira: None,
         }
     }
 
@@ -528,6 +602,8 @@ impl Editor {
         self.paquete = paquete.to_string();
         self.elegida = None;
         self.esperando = None;
+        self.ajustes_apuntar = false;
+        self.error_mira = None;
         self.nombre_esquema = None;
         self.aviso = None;
         self.esquemas = mapeo::esquemas(paquete);
@@ -578,7 +654,16 @@ impl Editor {
                     self.mapa.nodos.remove(i);
                 }
             }
-            Some(Asa::Apuntar | Asa::Disparo | Asa::Ojo) => self.mapa.raton = None,
+            Some(Asa::Apuntar | Asa::Disparo | Asa::Ojo) => {
+                self.mapa.raton = None;
+                self.ajustes_apuntar = false;
+            }
+            // Borrar la mira la apaga, como en BlueStacks.
+            Some(Asa::Mira) => {
+                if let Some(r) = &mut self.mapa.raton {
+                    r.mira.enabled = false;
+                }
+            }
             None => {}
         }
         self.esperando = None;
@@ -622,9 +707,13 @@ impl Editor {
                 extra: extra(),
             }),
             Tipo::Apuntar => {
-                self.mapa.raton = Some(Raton::nuevo(p));
+                let mut r = Raton::nuevo(p);
+                // «Ajustes» como BlueStacks: 0 en un control nuevo y el del esquema de Free Fire ahí.
+                r.tweaks = if self.paquete.starts_with("com.dts.freefire") { 16450 } else { 0 };
+                self.mapa.raton = Some(r);
                 self.elegida = Some(Asa::Apuntar);
                 self.esperando = None;
+                self.ajustes_apuntar = true;
                 return;
             }
             Tipo::Mirada => Nodo::MiradaLibre(MiradaLibre {
@@ -755,6 +844,11 @@ impl Editor {
                     r.mirada_pos = Some(p);
                 }
             }
+            Asa::Mira => {
+                if let Some(r) = &mut self.mapa.raton {
+                    (r.mira.x, r.mira.y) = (p.x, p.y);
+                }
+            }
         }
     }
 
@@ -771,9 +865,10 @@ impl Editor {
         if let Some(pos) = resp.interact_pointer_pos() {
             if resp.drag_started() {
                 self.arrastrando = tocada(pos);
-                if self.arrastrando.is_some() {
-                    self.elegida = self.arrastrando;
+                if let Some(asa) = self.arrastrando {
+                    self.elegida = Some(asa);
                     self.esperando = None;
+                    self.ajustes_apuntar &= asa.de_apuntar();
                 }
             }
             if resp.dragged() {
@@ -783,14 +878,14 @@ impl Editor {
             }
             if resp.clicked() {
                 self.elegida = tocada(pos);
-                // Al hacer clic en una tecla, la próxima tecla que presiones se asigna.
+                // Al hacer clic en una tecla, la próxima tecla que presiones se asigna. La puntería
+                // abre su ventana de ajustes (sus teclas se cambian ahí).
                 self.esperando = match self.elegida {
                     Some(Asa::Nodo(i)) if self.mapa.nodos.get(i).is_some_and(|n| !teclas(n).is_empty()) => Some(Objetivo::Tecla(i, 0)),
                     Some(Asa::Tecla(i, k)) => Some(Objetivo::Tecla(i, k)),
-                    Some(Asa::Apuntar) => Some(Objetivo::Cambio),
-                    Some(Asa::Ojo) => Some(Objetivo::Ojo),
                     _ => None,
                 };
+                self.ajustes_apuntar = self.elegida.is_some_and(Asa::de_apuntar);
             }
             // Con un script elegido, el clic derecho agrega un toque en ese punto (como BlueStacks).
             if resp.secondary_clicked() {
@@ -806,6 +901,7 @@ impl Editor {
         if resp.drag_stopped() {
             self.arrastrando = None;
         }
+        self.ventana_apuntar(ui.ctx(), rect);
         if self.esperando.is_some() {
             let aviso = "Presiona una tecla o botón del mouse  ·  Esc cancela  ·  Retroceso la quita";
             let pos = rect.center_top() + Vec2::new(0.0, 28.0);
@@ -995,21 +1091,7 @@ impl Editor {
     fn boton_tecla(&mut self, ui: &mut egui::Ui, texto: &str, tecla: &str, objetivo: Objetivo) {
         ui.horizontal(|ui| {
             ui.add_sized(Vec2::new(86.0, 24.0), egui::Label::new(RichText::new(texto).color(ICONO)));
-            let esperando = self.esperando == Some(objetivo);
-            let etiqueta = if esperando {
-                "Presiona…".to_string()
-            } else if tecla.is_empty() {
-                "Sin tecla".to_string()
-            } else {
-                etiqueta(tecla)
-            };
-            let mut b = egui::Button::new(RichText::new(etiqueta).strong()).min_size(Vec2::new(120.0, 24.0));
-            if esperando {
-                b = b.fill(ACENTO.gamma_multiply(0.35)).stroke(Stroke::new(1.0, ACENTO));
-            }
-            if ui.add(b).clicked() {
-                self.esperando = Some(objetivo);
-            }
+            selector_tecla(ui, &mut self.esperando, tecla, objetivo);
         });
     }
 
@@ -1233,67 +1315,275 @@ impl Editor {
     }
 
     fn propiedades_apuntar(&mut self, ui: &mut egui::Ui) {
-        let (cambio, pausa, ojo) = {
-            let r = self.mapa.raton.as_ref();
-            (self.mapa.cambio.clone(), r.and_then(|r| r.tecla_pausa.clone()).unwrap_or_default(), r.and_then(|r| r.mirada_tecla.clone()).unwrap_or_default())
-        };
         titulo(ui, ic::CROSSHAIR, "Apuntar y disparar");
-        self.boton_tecla(ui, "Activar", &cambio, Objetivo::Cambio);
-        self.boton_tecla(ui, "Suspender", &pausa, Objetivo::Pausa);
-        let Some(r) = &mut self.mapa.raton else { return };
-        posicion_ui(ui, "Posición", &mut r.inicio);
-        sensibilidad(ui, r);
-        ui.horizontal(|ui| {
-            ui.add_sized(Vec2::new(86.0, 20.0), egui::Label::new(RichText::new("Ajustes").color(ICONO)));
-            ui.add(egui::DragValue::new(&mut r.tweaks).hexadecimal(4, false, true));
-        });
-        ui.checkbox(&mut r.aceleracion, "Aceleración del mouse");
+        nota(ui, "Sus ajustes están en la ventana «Ajustes de apuntar, desplazar y disparar», como en BlueStacks.");
+        if !self.ajustes_apuntar && ui.button(format!("{}  Abrir los ajustes", ic::GEAR)).clicked() {
+            self.ajustes_apuntar = true;
+        }
+    }
 
-        seccion(ui, "Punto de mira");
-        ui.checkbox(&mut r.mira.enabled, "Mostrar el punto de mira");
-        if r.mira.enabled {
-            ui.horizontal(|ui| {
-                ui.add_sized(Vec2::new(86.0, 20.0), egui::Label::new(RichText::new("Estilo").color(ICONO)));
-                let actual = EstiloMira::TODOS.iter().find(|e| e.0 == r.mira.style).map_or("", |e| e.1);
-                egui::ComboBox::from_id_salt("mira").selected_text(actual).show_ui(ui, |ui| {
-                    for (estilo, nombre) in EstiloMira::TODOS {
-                        ui.selectable_value(&mut r.mira.style, estilo, nombre);
+    /// «Ajustes de apuntar, desplazar y disparar»: los campos de la ventana de BlueStacks, en el mismo
+    /// orden (los de su pestaña «Teclado y ratón»: el mando llega directo a Android).
+    fn ventana_apuntar(&mut self, ctx: &egui::Context, area: Rect) {
+        if self.mapa.raton.is_none() {
+            self.ajustes_apuntar = false;
+        }
+        if !self.ajustes_apuntar {
+            return;
+        }
+        let cambio = self.mapa.cambio.clone();
+        let marco = egui::Frame::new().fill(FONDO).corner_radius(8.0).stroke(Stroke::new(1.0, FONDO_HOVER)).inner_margin(egui::Margin::same(12));
+        // Del lado contrario al control, para no taparlo (después se queda donde la dejes).
+        let a_la_derecha = self.mapa.raton.as_ref().is_some_and(|r| r.inicio.x < 0.5);
+        let x = if a_la_derecha { area.max.x - 362.0 } else { area.min.x + 16.0 };
+        let (mut cerrar, mut eliminar, mut elegir_imagen) = (false, false, false);
+        egui::Window::new("Ajustes de apuntar, desplazar y disparar")
+            .id(Id::new("ajustes-apuntar"))
+            .title_bar(false)
+            .frame(marco)
+            // Del tamaño de lo que tiene (si no, egui la deja de 420 de alto); lo largo se desplaza.
+            .auto_sized()
+            .constrain_to(area)
+            .default_pos(Pos2::new(x, area.min.y + 16.0))
+            .show(ctx, |ui| {
+                ui.set_width(322.0);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 6.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(ic::CROSSHAIR).size(15.0).color(ACENTO));
+                    ui.label(RichText::new("Ajustes de apuntar, desplazar y disparar").size(13.0).strong().color(TEXTO));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        cerrar = crate::icono(ui, ic::X, "Cerrar", Vec2::new(24.0, 22.0), crate::CERRAR_HOVER).clicked();
+                    });
+                });
+                let Some(r) = self.mapa.raton.as_mut() else { return };
+                let esperando = &mut self.esperando;
+                let error_mira = &self.error_mira;
+                egui::ScrollArea::vertical().max_height((area.height() - 100.0).max(160.0)).show(ui, |ui| {
+                    seccion(ui, "Atajos de teclado");
+                    let pausa = r.tecla_pausa.clone().unwrap_or_default();
+                    rejilla(ui, "apuntar-teclas", |ui| {
+                        fila(ui, "Iniciar/Detener", |ui| selector_tecla(ui, esperando, &cambio, Objetivo::Cambio));
+                        fila(ui, "Suspender", |ui| selector_tecla(ui, esperando, &pausa, Objetivo::Pausa));
+                    });
+                    nota(ui, "Iniciar/Detener entra y sale de la puntería; mientras mantienes Suspender, el cursor queda libre.");
+
+                    seccion(ui, "Propiedades");
+                    rejilla(ui, "apuntar-propiedades", |ui| {
+                        posicion_filas(ui, ("X", "Y"), &mut r.inicio);
+                        // Como en BlueStacks, Y es la vertical de verdad (en el archivo va como proporción de X).
+                        let mut vertical = r.sens * r.ratio_y;
+                        fila(ui, "Sensibilidad del mouse X", |ui| {
+                            decimal(ui, &mut r.sens, 0.01..=100.0);
+                        });
+                        fila(ui, "Sensibilidad del mouse Y", |ui| {
+                            decimal(ui, &mut vertical, 0.01..=100.0);
+                        });
+                        r.ratio_y = vertical / r.sens.max(0.01);
+                        fila(ui, "Ajustes", |ui| {
+                            ui.add(egui::DragValue::new(&mut r.tweaks).range(0..=999_999_999)).on_hover_text(AYUDA_AJUSTES);
+                        });
+                        fila(ui, "Aceleración del mouse", |ui| {
+                            ui.checkbox(&mut r.aceleracion, "");
+                        });
+                    });
+
+                    ui.add_space(4.0);
+                    ui.checkbox(&mut r.mira.enabled, RichText::new("Punto de mira").strong().color(TEXTO));
+                    if r.mira.enabled {
+                        let mira = &mut r.mira;
+                        rejilla(ui, "apuntar-mira", |ui| {
+                            fila(ui, "Estilo", |ui| {
+                                let actual = EstiloMira::TODOS.iter().find(|e| e.0 == mira.style).map_or("", |e| e.1);
+                                egui::ComboBox::from_id_salt("estilo-mira").selected_text(actual).show_ui(ui, |ui| {
+                                    for (estilo, nombre) in EstiloMira::TODOS {
+                                        ui.selectable_value(&mut mira.style, estilo, nombre);
+                                    }
+                                });
+                            });
+                            if mira.style == EstiloMira::Imagen {
+                                fila(ui, "Imagen", |ui| {
+                                    elegir_imagen = ui.button(if mira.image.is_empty() { "Elegir archivo" } else { "Cambiar archivo" }).clicked();
+                                });
+                            }
+                            fila(ui, "Tamaño", |ui| {
+                                decimal(ui, &mut mira.size, 1.0..=10.0);
+                            });
+                            fila(ui, "Opacidad", |ui| {
+                                ui.add(egui::DragValue::new(&mut mira.opacity).range(0.0..=100.0).speed(0.5).fixed_decimals(0).suffix(" %"));
+                            });
+                            // La imagen va con sus colores.
+                            if mira.style != EstiloMira::Imagen {
+                                fila(ui, "Color", |ui| {
+                                    ui.horizontal(|ui| {
+                                        let mut color = mira.color32();
+                                        if ui.color_edit_button_srgba(&mut color).changed() {
+                                            let [rr, g, b, _] = color.to_srgba_unmultiplied();
+                                            mira.color = format!("#{rr:02X}{g:02X}{b:02X}");
+                                        }
+                                        ui.add(egui::TextEdit::singleline(&mut mira.color).desired_width(70.0));
+                                    });
+                                });
+                            }
+                        });
+                        if mira.style == EstiloMira::Imagen {
+                            let texto = match error_mira {
+                                Some(e) => e.clone(),
+                                None if mira.image.is_empty() => "Un PNG o JPG de hasta 5 MB.".into(),
+                                None => format!("{} · un PNG o JPG de hasta 5 MB.", mira.image),
+                            };
+                            nota(ui, &texto);
+                        }
+                        nota(ui, "La opacidad de la mira no depende de la de los controles en pantalla. Arrástrala en la pantalla para moverla.");
                     }
+
+                    ui.add_space(4.0);
+                    ui.checkbox(&mut r.disparo_con_clic, RichText::new("Disparar con clic izquierdo").strong().color(TEXTO));
+                    if r.disparo_con_clic {
+                        nota(ui, &format!("{}  Pon el ícono de fuego sobre el botón de disparo del juego.", ic::MOUSE_LEFT_CLICK));
+                        let inicio = r.inicio;
+                        let disparo = r.disparo.get_or_insert(Punto::nuevo(inicio.x + 0.05, inicio.y + 0.2));
+                        rejilla(ui, "apuntar-disparo", |ui| {
+                            posicion_filas(ui, ("Posición de acción X", "Posición de acción Y"), disparo);
+                            fila(ui, "Acción", |ui| {
+                                ui.label(RichText::new("Clic izquierdo").color(TEXTO));
+                            });
+                        });
+                    }
+
+                    ui.add_space(4.0);
+                    let mut mirar = r.mirada_pos.is_some();
+                    if ui.checkbox(&mut mirar, RichText::new("Mirar alrededor").strong().color(TEXTO)).changed() {
+                        // Como en BlueStacks: al prenderlo aparece el ojo para ponerlo y su tecla es V; al
+                        // apagarlo se quitan los dos.
+                        let tecla = r.mirada_tecla.take().unwrap_or_else(|| "V".into());
+                        r.mirada_tecla = mirar.then_some(tecla);
+                        r.mirada_pos = mirar.then(|| Punto::nuevo(r.inicio.x, (r.inicio.y - 0.25).max(0.05)));
+                    }
+                    let tecla_ojo = r.mirada_tecla.clone().unwrap_or_default();
+                    if let Some(ojo) = &mut r.mirada_pos {
+                        nota(
+                            ui,
+                            &format!(
+                                "{}  Pon el ícono del ojo sobre el botón de mirar alrededor del juego, si lo tiene. Mientras mantienes Mirada libre, el mouse mueve el ojo y no la mira.",
+                                ic::EYE
+                            ),
+                        );
+                        rejilla(ui, "apuntar-mirar", |ui| {
+                            posicion_filas(ui, ("Posición de mirada libre X", "Posición de mirada libre Y"), ojo);
+                            fila(ui, "Mirada libre", |ui| selector_tecla(ui, esperando, &tecla_ojo, Objetivo::Ojo));
+                        });
+                    }
+
+                    ui.add_space(4.0);
+                    ui.checkbox(&mut r.mostrar, "Mostrar teclas en pantalla");
+                });
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    eliminar = ui.add(egui::Button::new(RichText::new(format!("{}  Eliminar", ic::TRASH)).color(crate::CERRAR_HOVER))).clicked();
+                    ui.label(RichText::new("Los cambios se guardan con «Guardar».").size(11.0).color(TENUE));
                 });
             });
-            numero(ui, "Tamaño", &mut r.mira.size, 1.0..=5.0, "");
-            numero(ui, "Opacidad", &mut r.mira.opacity, 10.0..=100.0, "%");
-            ui.horizontal(|ui| {
-                ui.add_sized(Vec2::new(86.0, 20.0), egui::Label::new(RichText::new("Color").color(ICONO)));
-                let mut color = r.mira.color32();
-                if ui.color_edit_button_srgba(&mut color).changed() {
-                    let [rr, g, b, _] = color.to_srgba_unmultiplied();
-                    r.mira.color = format!("#{rr:02X}{g:02X}{b:02X}");
+        if cerrar {
+            self.ajustes_apuntar = false;
+        }
+        if eliminar {
+            self.elegida = Some(Asa::Apuntar);
+            self.eliminar();
+        }
+        if elegir_imagen {
+            if let Some(ruta) = elegir_imagen_mira() {
+                match guardar_imagen_mira(&ruta) {
+                    Ok(nombre) => {
+                        if let Some(r) = &mut self.mapa.raton {
+                            r.mira.image = nombre;
+                        }
+                        self.error_mira = None;
+                    }
+                    Err(e) => self.error_mira = Some(e),
                 }
-                ui.add(egui::TextEdit::singleline(&mut r.mira.color).desired_width(70.0));
-            });
-        }
-
-        seccion(ui, "Disparar con clic izquierdo");
-        ui.checkbox(&mut r.disparo_con_clic, "Disparar con clic izquierdo");
-        if r.disparo_con_clic {
-            let disparo = r.disparo.get_or_insert(Punto::nuevo(r.inicio.x + 0.05, r.inicio.y + 0.2));
-            posicion_ui(ui, "Botón de fuego", disparo);
-        }
-
-        seccion(ui, "Mirar alrededor");
-        let mut mirar = r.mirada_pos.is_some();
-        if ui.checkbox(&mut mirar, "Mirar alrededor sin mover la mira").changed() {
-            r.mirada_pos = mirar.then(|| Punto::nuevo(r.inicio.x, (r.inicio.y - 0.25).max(0.05)));
-            if mirar && r.mirada_tecla.is_none() {
-                r.mirada_tecla = Some("Key_Alt".into());
             }
         }
-        if let Some(ojo_pos) = &mut r.mirada_pos {
-            posicion_ui(ui, "Botón del ojo", ojo_pos);
-            nota(ui, "Pon el ojo sobre el botón de mirar del juego. Mientras presionas su tecla, el mouse mira alrededor.");
-            self.boton_tecla(ui, "Tecla", &ojo, Objetivo::Ojo);
-        }
+    }
+}
+
+/// Lo que hace cada bit de «Ajustes» (los `Tweaks` de BlueStacks) que ZYKRO entiende.
+const AYUDA_AJUSTES: &str = "Comportamientos de BlueStacks, sumados (los «Tweaks»).\n\
+    0: lo normal: al salirse de la pantalla, el dedo vuelve a empezar en X, Y.\n\
+    16450: el de Free Fire (2 + 64 + 16384).\n\
+    1: vuelve a empezar cada 200 ms.\n\
+    2: nunca vuelve a empezar.\n\
+    4: no pasa del 55 % hacia la izquierda.\n\
+    8: como mucho 125 movimientos por segundo.\n\
+    16: llega hasta 1.2 veces la distancia a la orilla.\n\
+    64: redondea a píxeles enteros.\n\
+    128: vuelve a empezar si quedó lejos y el mouse casi no se mueve.\n\
+    1024: no pasa de la mitad hacia arriba.\n\
+    2048: espera 20 ms antes de volver a bajar el dedo.\n\
+    8192: límites a los lados (los del archivo).\n\
+    16384: la curva de BlueStacks para Free Fire.";
+
+/// Una rejilla de dos columnas (nombre y valor), como los ajustes de BlueStacks.
+fn rejilla(ui: &mut egui::Ui, id: &str, contenido: impl FnOnce(&mut egui::Ui)) {
+    egui::Grid::new(id).num_columns(2).spacing(Vec2::new(12.0, 6.0)).min_col_width(150.0).show(ui, contenido);
+}
+
+fn fila(ui: &mut egui::Ui, texto: &str, valor: impl FnOnce(&mut egui::Ui)) {
+    ui.label(RichText::new(texto).color(ICONO));
+    valor(ui);
+    ui.end_row();
+}
+
+/// Un número con dos decimales. Devuelve si cambió.
+fn decimal(ui: &mut egui::Ui, valor: &mut f32, rango: std::ops::RangeInclusive<f32>) -> bool {
+    let paso = ((*rango.end() - *rango.start()) / 2000.0).max(0.01);
+    ui.add(egui::DragValue::new(valor).range(rango).speed(paso).fixed_decimals(2)).changed()
+}
+
+/// Una posición en % de la pantalla (dos filas, X y Y), como la escribe BlueStacks.
+fn posicion_filas(ui: &mut egui::Ui, nombres: (&str, &str), p: &mut Punto) {
+    let (mut x, mut y) = (p.x * 100.0, p.y * 100.0);
+    let mut cambio = false;
+    fila(ui, nombres.0, |ui| cambio |= decimal(ui, &mut x, 0.0..=100.0));
+    fila(ui, nombres.1, |ui| cambio |= decimal(ui, &mut y, 0.0..=100.0));
+    if cambio {
+        *p = Punto::nuevo(x / 100.0, y / 100.0);
+    }
+}
+
+/// El diálogo de KDE (o el de GNOME) para elegir la imagen de la mira.
+fn elegir_imagen_mira() -> Option<PathBuf> {
+    let inicio = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let tipos = "*.png *.jpg *.jpeg";
+    let salida = Command::new("kdialog")
+        .args(["--title", "Imagen del punto de mira", "--getopenfilename"])
+        .arg(&inicio)
+        .arg(format!("{tipos}|Imágenes"))
+        .output()
+        .or_else(|_| {
+            Command::new("zenity").args(["--file-selection", "--title=Imagen del punto de mira", &format!("--file-filter=Imágenes | {tipos}")]).output()
+        })
+        .ok()?;
+    let ruta = String::from_utf8_lossy(&salida.stdout).trim().to_string();
+    (salida.status.success() && !ruta.is_empty()).then(|| PathBuf::from(ruta))
+}
+
+/// El botón con la tecla de un control: al tocarlo, la próxima tecla que presiones se asigna.
+fn selector_tecla(ui: &mut egui::Ui, esperando: &mut Option<Objetivo>, tecla: &str, objetivo: Objetivo) {
+    let activo = *esperando == Some(objetivo);
+    let texto = if activo {
+        "Presiona…".to_string()
+    } else if tecla.is_empty() {
+        "Sin tecla".to_string()
+    } else {
+        etiqueta(tecla)
+    };
+    let mut b = egui::Button::new(RichText::new(texto).strong()).min_size(Vec2::new(120.0, 24.0));
+    if activo {
+        b = b.fill(ACENTO.gamma_multiply(0.35)).stroke(Stroke::new(1.0, ACENTO));
+    }
+    if ui.add(b).clicked() {
+        *esperando = Some(objetivo);
     }
 }
 
@@ -1392,4 +1682,89 @@ fn elegir_json(guardar: bool, nombre: &str) -> Option<PathBuf> {
         .ok()?;
     let ruta = String::from_utf8_lossy(&salida.stdout).trim().to_string();
     (salida.status.success() && !ruta.is_empty()).then(|| PathBuf::from(ruta))
+}
+
+#[cfg(test)]
+mod pruebas {
+    use super::*;
+
+    fn textos(forma: &egui::Shape, salida: &mut Vec<String>) {
+        match forma {
+            egui::Shape::Text(t) => salida.push(t.galley.text().to_string()),
+            egui::Shape::Vec(v) => v.iter().for_each(|f| textos(f, salida)),
+            _ => {}
+        }
+    }
+
+    const PANTALLA: Vec2 = Vec2::new(1600.0, 900.0);
+
+    /// Un cuadro del editor sobre una pantalla de 1600×900; devuelve los textos dibujados.
+    fn cuadro(ctx: &egui::Context, editor: &mut Editor, eventos: Vec<egui::Event>, tiempo: f64) -> Vec<String> {
+        let pantalla = Rect::from_min_size(Pos2::ZERO, PANTALLA);
+        let entrada = egui::RawInput { screen_rect: Some(pantalla), events: eventos, time: Some(tiempo), ..Default::default() };
+        let mut salida = ctx.run_ui(entrada, |ui| editor.pantalla(ui, pantalla));
+        let mut dibujados = Vec::new();
+        for forma in std::mem::take(&mut salida.shapes) {
+            textos(&forma.shape, &mut dibujados);
+        }
+        salida.drop_without_applying_deltas();
+        dibujados
+    }
+
+    /// Un clic en el control de puntería abre «Ajustes de apuntar, desplazar y disparar» con los
+    /// campos de BlueStacks (y ya no espera una tecla).
+    #[test]
+    fn la_punteria_abre_sus_ajustes() {
+        let ctx = egui::Context::default();
+        let mut editor = Editor::new();
+        let mut mapa = Mapa::default();
+        mapa.raton = Some(Raton::nuevo(Punto::nuevo(0.25, 0.5)));
+        editor.abrir("com.dts.freefireth", Some(mapa));
+        let pos = Pos2::new(PANTALLA.x * 0.25, PANTALLA.y * 0.5);
+        let clic = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        cuadro(&ctx, &mut editor, vec![egui::Event::PointerMoved(pos)], 0.0);
+        cuadro(&ctx, &mut editor, vec![clic(true)], 0.05);
+        cuadro(&ctx, &mut editor, vec![clic(false)], 0.1);
+        assert!(editor.ajustes_apuntar);
+        assert_eq!(editor.esperando, None);
+        cuadro(&ctx, &mut editor, vec![], 0.2);
+        let dibujados = cuadro(&ctx, &mut editor, vec![], 0.3);
+        for texto in [
+            "Ajustes de apuntar, desplazar y disparar",
+            "Iniciar/Detener",
+            "Suspender",
+            "Sensibilidad del mouse X",
+            "Sensibilidad del mouse Y",
+            "Ajustes",
+            "Aceleración del mouse",
+            "Punto de mira",
+            "Disparar con clic izquierdo",
+            "Posición de acción X",
+            "Mirar alrededor",
+            "Mostrar teclas en pantalla",
+        ] {
+            assert!(dibujados.iter().any(|d| d.contains(texto)), "falta «{texto}» en {dibujados:?}");
+        }
+        let ventana = ctx.memory(|m| m.area_rect(Id::new("ajustes-apuntar"))).expect("la ventana");
+        assert!(Rect::from_min_size(Pos2::ZERO, PANTALLA).contains_rect(ventana), "{ventana:?}");
+
+        // Un clic dentro de la ventana no le llega a la pantalla de atrás (no la cierra).
+        let dentro = Pos2::new(ventana.center().x, ventana.min.y + 6.0);
+        let clic = |pressed| egui::Event::PointerButton { pos: dentro, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        cuadro(&ctx, &mut editor, vec![egui::Event::PointerMoved(dentro)], 0.32);
+        cuadro(&ctx, &mut editor, vec![clic(true)], 0.34);
+        cuadro(&ctx, &mut editor, vec![clic(false)], 0.36);
+        assert!(editor.ajustes_apuntar);
+        assert_eq!(editor.elegida, Some(Asa::Apuntar));
+
+        // Con todo prendido sigue cabiendo en la pantalla (lo que no quepa se desplaza adentro).
+        if let Some(r) = &mut editor.mapa.raton {
+            r.mira.enabled = true;
+            r.mirada_pos = Some(Punto::nuevo(0.3, 0.3));
+        }
+        cuadro(&ctx, &mut editor, vec![], 0.4);
+        cuadro(&ctx, &mut editor, vec![], 0.5);
+        let ventana = ctx.memory(|m| m.area_rect(Id::new("ajustes-apuntar"))).expect("la ventana");
+        assert!(Rect::from_min_size(Pos2::ZERO, PANTALLA).contains_rect(ventana), "{ventana:?}");
+    }
 }

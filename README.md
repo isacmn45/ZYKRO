@@ -20,12 +20,17 @@ teclas y una puntería que se siente como la de BlueStacks. Todo lo que hay entr
   repetidos, D-pad (con teclas para correr, velocidad, activación y zona muerta), apuntar y disparar,
   mirada libre, script (mismos comandos que BlueStacks), deslizar, zoom, D-pad y habilidad MOBA
   (lanzamiento rápido, automático o manual), rotar, desplazamiento de borde, desplazarse y rueda del
-  mouse, cada uno con sus ajustes avanzados. Apuntar tiene punto de mira (estilo, tamaño, opacidad y
-  color), aceleración del mouse y mirar alrededor sin mover la mira. Varios esquemas de controles por
-  juego, que se importan, exportan y cambian desde el menú rápido. Lee los mapas de SwagPlayer y
-  QtScrcpy. La inclinación no está: este Android no tiene sensores.
+  mouse, cada uno con sus ajustes avanzados. Apuntar abre su propia ventana, «Ajustes de apuntar,
+  desplazar y disparar», con los campos de BlueStacks: iniciar/detener y suspender, sensibilidad X e Y,
+  «Ajustes» (los Tweaks), aceleración del mouse, punto de mira (estilo o imagen propia, tamaño, opacidad
+  y color, y se arrastra), disparar con clic izquierdo, mirar alrededor y mostrar las teclas en
+  pantalla. Varios esquemas de controles por juego, que se importan, exportan y cambian desde el menú
+  rápido. Lee los mapas de SwagPlayer y QtScrcpy. La inclinación no está: este Android no tiene
+  sensores.
 - **Puntería como BlueStacks:** el mouse se lee directo (evdev) y la cámara usa la misma fórmula que
-  BlueStacks 5, así que la sensibilidad se siente igual. `` ` `` suspende o activa la puntería.
+  BlueStacks 5, así que la sensibilidad se siente igual. También hace como allá la aceleración del
+  mouse (la curva de Windows), mirar alrededor y cuándo el dedo vuelve a empezar al salirse de la
+  pantalla. `` ` `` suspende o activa la puntería.
 - **Sonido** de Android.
 - **Configuración con las secciones de BlueStacks 5**, solo con lo que de verdad funciona aquí:
   - *Rendimiento:* modos (perfil de energía, prioridad de Android y una velocidad mínima para la GPU

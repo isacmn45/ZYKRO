@@ -92,12 +92,15 @@ pub struct Raton {
     pub limite_arr: f32,
     #[serde(rename = "panLimitBottom", default = "limite")]
     pub limite_aba: f32,
-    /// Punto de mira en el centro de la imagen mientras apuntas.
+    /// Punto de mira mientras apuntas.
     #[serde(rename = "crosshair", default)]
     pub mira: Mira,
-    /// Aceleración del mouse: cuanto más rápido lo mueves, más gira la cámara.
+    /// Aceleración del mouse: cuanto más rápido lo mueves, más gira la cámara (ver `acelerar`).
     #[serde(rename = "mouseAcceleration", default)]
     pub aceleracion: bool,
+    /// «Mostrar teclas en pantalla» de este control (`ShowOnOverlay` de BlueStacks).
+    #[serde(rename = "showOnOverlay", default = "si")]
+    pub mostrar: bool,
     /// Mirar alrededor sin mover la mira («Look around mode» de BlueStacks): su tecla y el botón del ojo.
     #[serde(rename = "freeLookKey", default, skip_serializing_if = "Option::is_none")]
     pub mirada_tecla: Option<String>,
@@ -138,6 +141,7 @@ impl Raton {
             limite_aba: 350.0,
             mira: Mira::default(),
             aceleracion: false,
+            mostrar: true,
             mirada_tecla: None,
             mirada_pos: None,
             extra,
@@ -153,14 +157,24 @@ pub enum EstiloMira {
     Punto,
     Circulo,
     CruzPunto,
+    /// Una imagen propia (`Mira::image`).
+    Imagen,
 }
 
 impl EstiloMira {
-    pub const TODOS: [(EstiloMira, &'static str); 4] =
-        [(EstiloMira::Cruz, "Cruz"), (EstiloMira::Punto, "Punto"), (EstiloMira::Circulo, "Círculo"), (EstiloMira::CruzPunto, "Cruz con punto")];
+    /// En el orden de BlueStacks.
+    pub const TODOS: [(EstiloMira, &'static str); 5] = [
+        (EstiloMira::Cruz, "Cruz"),
+        (EstiloMira::Punto, "Punto"),
+        (EstiloMira::CruzPunto, "Cruz con punto"),
+        (EstiloMira::Circulo, "Círculo"),
+        (EstiloMira::Imagen, "Personalizada"),
+    ];
 }
 
-/// El punto de mira: estilo, tamaño (1 a 5), opacidad (0 a 100) y color en hexadecimal.
+/// El punto de mira: estilo, tamaño (1 o más), opacidad (0 a 100), color en hexadecimal, dónde va
+/// (al centro, como `CrosshairX`/`CrosshairY` de BlueStacks) y la imagen del estilo personalizado
+/// (un PNG en `carpeta_miras`).
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct Mira {
     #[serde(default)]
@@ -173,11 +187,17 @@ pub struct Mira {
     pub opacity: f32,
     #[serde(default = "blanco")]
     pub color: String,
+    #[serde(default = "medio")]
+    pub x: f32,
+    #[serde(default = "medio")]
+    pub y: f32,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub image: String,
 }
 
 impl Default for Mira {
     fn default() -> Self {
-        Mira { enabled: false, style: EstiloMira::Cruz, size: 1.0, opacity: 100.0, color: blanco() }
+        Mira { enabled: false, style: EstiloMira::Cruz, size: 1.0, opacity: 100.0, color: blanco(), x: 0.5, y: 0.5, image: String::new() }
     }
 }
 
@@ -652,6 +672,11 @@ fn carpeta(app: &str) -> PathBuf {
     base.join(app).join("keymap")
 }
 
+/// Las imágenes de los puntos de mira personalizados (`Mira::image` es el nombre del archivo).
+pub fn carpeta_miras() -> PathBuf {
+    carpeta("zykro").join("miras")
+}
+
 impl Mapa {
     fn desde_json(v: Value) -> Option<Mapa> {
         let Value::Object(mut o) = v else { return None };
@@ -848,9 +873,25 @@ pub fn etiqueta(nombre: &str) -> String {
 const ID_APUNTAR: u64 = 2;
 const ID_DISPARO: u64 = 3;
 const ID_MIRADA: u64 = 5;
+/// El ojo de «Mirar alrededor» de la puntería.
+const ID_OJO: u64 = 6;
 const ID_NODO: u64 = 100;
 /// Bit de `tweaks`: la posición se calcula desde el ancla con el total acumulado y la curva en X.
 const MODO_ABSOLUTO: u32 = 0x4000;
+/// Los demás bits de `tweaks` («Ajustes» de BlueStacks) que ZYKRO hace como BlueStacks 5.22
+/// (`ImapRtPan`, ver docs/investigacion.md). Sin ninguno, el dedo vuelve a empezar en X, Y al salirse
+/// de la pantalla.
+const RECENTRAR_SIEMPRE: u32 = 0x1;
+const SIN_RECENTRAR: u32 = 0x2;
+const SOLO_DERECHA: u32 = 0x4;
+const LIMITAR_ENVIOS: u32 = 0x8;
+const RANGO_POR_ORILLA: u32 = 0x10;
+/// A píxeles enteros de la ventana de BlueStacks.
+const REDONDEAR: u32 = 0x40;
+const RECENTRAR_QUIETO: u32 = 0x80;
+const SOLO_ABAJO: u32 = 0x400;
+const PAUSA_RECENTRAR: u32 = 0x800;
+const LIMITES: u32 = 0x2000;
 /// Alto de la imagen de BlueStacks maximizado en una pantalla de 1920×1080. BlueStacks mide el
 /// movimiento del mouse en píxeles de su ventana y lo pasa a porcentaje de la pantalla de Android:
 /// con este tamaño fijo la cámara va como allá, sin depender de la resolución de Android ni del
@@ -866,14 +907,97 @@ fn dedo(i: usize, k: u64) -> u64 {
 }
 
 /// Dedo de la cámara, como BlueStacks: se baja en `startPos`, cada movimiento recalcula la posición
-/// desde ahí con todo lo que se movió el mouse y queda puesto mientras dure la puntería.
+/// desde ahí con todo lo que se movió el mouse y queda puesto mientras dure la puntería. Mirando
+/// alrededor es el dedo del ojo.
 struct Apunte {
-    /// Donde se bajó el dedo, en píxeles de Android.
+    dedo: u64,
+    /// Donde se bajó el dedo, en % de la pantalla.
     ancla: (f64, f64),
-    /// Cuentas del mouse desde que se bajó el dedo.
+    /// Cuentas del mouse desde que se bajó el dedo (o desde que volvió a empezar).
     acumulado: (f64, f64),
-    /// Último punto mandado.
+    /// Último punto mandado, en píxeles de Android.
     punto: (i32, i32),
+    /// `false` mientras espera para volver a bajar (`PAUSA_RECENTRAR`).
+    abajo: bool,
+    /// Cuándo bajó o volvió a empezar por última vez.
+    desde: Instant,
+    /// Último envío (`LIMITAR_ENVIOS`).
+    envio: Instant,
+    /// Desde cuándo y cuánto se movió el mouse (`RECENTRAR_QUIETO`).
+    quieto: (Instant, f64),
+}
+
+impl Apunte {
+    fn nuevo(dedo: u64, ancla: (f64, f64), punto: (i32, i32)) -> Apunte {
+        let ahora = Instant::now();
+        Apunte { dedo, ancla, acumulado: (0.0, 0.0), punto, abajo: true, desde: ahora, envio: ahora, quieto: (ahora, 0.0) }
+    }
+}
+
+/// La cámara de BlueStacks (ver `Motor::mover`).
+struct Camara {
+    sens: (f64, f64),
+    curva: bool,
+    ancho_bs: f64,
+}
+
+impl Camara {
+    /// Dónde va el dedo (en % de la pantalla) con `acumulado` cuentas del mouse desde `ancla`.
+    fn posicion(&self, ancla: (f64, f64), acumulado: (f64, f64)) -> (f64, f64) {
+        let dx = self.sens.0 * acumulado.0;
+        let dx = if self.curva { curva::horizontal(dx) } else { dx };
+        (ancla.0 + dx / self.ancho_bs * 100.0, ancla.1 + self.sens.1 * acumulado.1 / ALTO_BLUESTACKS * 100.0)
+    }
+}
+
+/// De % de la pantalla a píxeles de Android, truncando hacia cero como SwagPlayer.
+fn a_pixeles(p: (f64, f64), w: f32, h: f32) -> (i32, i32) {
+    ((p.0 / 100.0 * w as f64) as i32, (p.1 / 100.0 * h as f64) as i32)
+}
+
+/// Si el dedo en `p` (en %) puede seguir donde está; si no, vuelve a empezar en el ancla. Como
+/// BlueStacks: con `SOLO_DERECHA` no pasa del 55 % hacia la izquierda y con `SOLO_ABAJO` del 50 %
+/// hacia arriba; con `RANGO_POR_ORILLA` llega a 1.2 veces la distancia a la orilla más lejana (solo
+/// a lo ancho); sin nada, hasta las orillas de la pantalla, y con `SIN_RECENTRAR`, adonde sea.
+fn en_pantalla(tweaks: u32, p: (f64, f64), ancla: (f64, f64)) -> bool {
+    if tweaks & (SOLO_DERECHA | SOLO_ABAJO) != 0 {
+        let x_min = if tweaks & SOLO_DERECHA != 0 { 55.0 } else { 0.0 };
+        let y_min = if tweaks & SOLO_ABAJO != 0 { 50.0 } else { 0.0 };
+        (x_min..=100.0).contains(&p.0) && (y_min..=100.0).contains(&p.1)
+    } else if tweaks & RANGO_POR_ORILLA != 0 {
+        let lejos = if ancla.0 <= 50.0 { 100.0 - ancla.0 } else { ancla.0 };
+        (p.0 - ancla.0).abs() <= lejos * 1.2
+    } else {
+        tweaks & SIN_RECENTRAR != 0 || ((0.0..=100.0).contains(&p.0) && (0.0..=100.0).contains(&p.1))
+    }
+}
+
+/// «Aceleración del mouse» de BlueStacks (`getPointerFromMouseData`): imita «Mejorar la precisión
+/// del puntero» de Windows con su curva (`SmoothMouseXCurve`/`SmoothMouseYCurve` del registro; aquí,
+/// la de fábrica de Windows 7 en adelante). Va eje por eje con cada reporte del mouse:
+/// `v = |cuentas| / 3.5`, se interpola en la curva y sale `⌈f(v) · 96 / 150⌉` con el mismo signo.
+/// Pasado el último punto (más de 140 cuentas en un reporte) BlueStacks devuelve 0; aquí sigue la
+/// última recta.
+fn acelerar(cuentas: f32) -> f32 {
+    const X: [f64; 5] = [0.0, 28181.0 / 65536.0, 1.25, 252969.0 / 65536.0, 40.0];
+    const Y: [f64; 5] = [0.0, 70141.0 / 65536.0, 4.140625, 18.984375, 443.75];
+    let v = (cuentas as f64).abs() / 3.5;
+    if v == 0.0 {
+        return 0.0;
+    }
+    let i = (1..X.len()).find(|&i| v <= X[i]).unwrap_or(X.len() - 1);
+    let f = Y[i - 1] + (Y[i] - Y[i - 1]) / (X[i] - X[i - 1]) * (v - X[i - 1]);
+    ((f * 96.0 / 150.0).ceil() as f32).copysign(cuentas)
+}
+
+/// «Mirar alrededor» de la puntería, como BlueStacks: al presionar su tecla se levanta el dedo de la
+/// cámara y 100 ms después baja otro en el ojo, que el mouse arrastra; al soltarla se levanta y la
+/// cámara vuelve a bajar con el primer movimiento pasados 50 ms.
+#[derive(Clone, Copy, PartialEq)]
+enum Mirar {
+    Bajando(Instant),
+    Mirando,
+    Volviendo(Instant),
 }
 
 /// Toque programado (doble toque, varios toques, deslizar).
@@ -895,9 +1019,9 @@ struct MovDpad {
     primero: bool,
 }
 
-/// La mirada libre en curso: su control (`None` = la de apuntar) y el dedo.
+/// La mirada libre en curso (control «Mirada libre»): su control y el dedo.
 struct Mirada {
-    nodo: Option<usize>,
+    nodo: usize,
     ancla: (f32, f32),
     punto: (f32, f32),
     /// Llegó a la orilla: el dedo vuelve al ojo a esta hora.
@@ -968,6 +1092,7 @@ pub struct Motor {
     /// Próximo toque de los «toques repetidos» que siguen mientras la tecla esté presionada.
     repetidos: HashMap<usize, Instant>,
     mirada: Option<Mirada>,
+    mirar: Option<Mirar>,
     scripts: Vec<Ejecucion>,
     /// Dedos que tiene puestos cada script con `touch` (y si tiene el del mouse).
     dedos_script: HashMap<usize, usize>,
@@ -999,6 +1124,7 @@ impl Motor {
             dpads: HashMap::new(),
             repetidos: HashMap::new(),
             mirada: None,
+            mirar: None,
             scripts: Vec::new(),
             dedos_script: HashMap::new(),
             deslizar: HashMap::new(),
@@ -1049,7 +1175,7 @@ impl Motor {
     }
 
     fn mirada_con_teclado(&self, m: &Mirada) -> bool {
-        let nodo = m.nodo.and_then(|i| self.mapa.as_ref()?.nodos.get(i));
+        let nodo = self.mapa.as_ref().and_then(|mapa| mapa.nodos.get(m.nodo));
         matches!(nodo, Some(Nodo::MiradaLibre(n)) if n.teclado)
     }
 
@@ -1107,6 +1233,7 @@ impl Motor {
         self.dpads.clear();
         self.repetidos.clear();
         self.mirada = None;
+        self.mirar = None;
         self.scripts.clear();
         self.dedos_script.clear();
         self.deslizar.clear();
@@ -1139,23 +1266,27 @@ impl Motor {
             return true;
         }
         if let Some(r) = &mapa.raton {
+            // Suspender mientras se mantiene presionada (BlueStacks la ignora mirando alrededor).
             if r.tecla_pausa.as_deref() == Some(nombre) {
-                self.pausa = presionada;
-                if presionada {
-                    self.soltar_apunte(ctl, w, h);
+                if !matches!(self.mirar, Some(Mirar::Bajando(_) | Mirar::Mirando)) {
+                    self.pausa = presionada && self.apuntando;
+                    if self.pausa {
+                        self.soltar_apunte(ctl, w, h);
+                    }
                 }
                 usada = true;
             }
-            // Mirar alrededor dentro de la puntería: la mira se queda y el mouse mueve el ojo.
-            if let (Some(tecla), Some(pos)) = (&r.mirada_tecla, r.mirada_pos) {
-                if tecla == nombre {
+            // Mirar alrededor dentro de la puntería: mientras se mantiene presionada, el mouse
+            // arrastra el ojo en vez de la cámara.
+            if r.mirada_tecla.as_deref() == Some(nombre) && r.mirada_pos.is_some() {
+                if self.apuntando && !self.pausa {
                     if presionada {
-                        self.empezar_mirada(None, pf(pos), ctl, w, h);
-                    } else if self.mirada.as_ref().is_some_and(|m| m.nodo.is_none()) {
-                        self.terminar_mirada(ctl, w, h);
+                        self.empezar_mirar(ctl, w, h);
+                    } else {
+                        self.terminar_mirar(ctl, w, h);
                     }
-                    usada = true;
                 }
+                usada = true;
             }
         }
         let ctrl = self.presionadas.contains_key("Key_Control");
@@ -1235,13 +1366,13 @@ impl Motor {
                 Nodo::MiradaLibre(m) if m.key == nombre => {
                     usada = true;
                     if presionada {
-                        self.empezar_mirada(Some(i), pf(m.pos), ctl, w, h);
-                    } else if self.mirada.as_ref().is_some_and(|x| x.nodo == Some(i)) {
+                        self.empezar_mirada(i, pf(m.pos), ctl, w, h);
+                    } else if self.mirada.as_ref().is_some_and(|x| x.nodo == i) {
                         self.terminar_mirada(ctl, w, h);
                     }
                 }
                 Nodo::MiradaLibre(m) if m.teclado && [&m.arriba, &m.abajo, &m.izquierda, &m.derecha].iter().any(|k| k.as_str() == nombre) => {
-                    usada |= self.mirada.as_ref().is_some_and(|x| x.nodo == Some(i));
+                    usada |= self.mirada.as_ref().is_some_and(|x| x.nodo == i);
                 }
                 Nodo::Script(sn) if sn.key == nombre => {
                     usada = true;
@@ -1367,7 +1498,8 @@ impl Motor {
     /// manual apuntando, la lanza.
     pub fn boton(&mut self, boton: PointerButton, presionado: bool, ctl: &Control, w: f32, h: f32) -> bool {
         let nombre = nombre_boton(boton);
-        if boton == PointerButton::Primary && self.cursor_bloqueado() && self.mirada.is_none() {
+        let bajando_ojo = matches!(self.mirar, Some(Mirar::Bajando(_)));
+        if boton == PointerButton::Primary && self.cursor_bloqueado() && self.mirada.is_none() && !bajando_ojo {
             let disparo = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).filter(|r| r.disparo_con_clic).and_then(|r| r.disparo);
             if let Some(p) = disparo {
                 if presionado && self.disparo.is_some() {
@@ -1490,20 +1622,22 @@ impl Motor {
     ///
     /// SwagPlayer copió esta fórmula pero toma el resultado como píxeles de Android; BlueStacks, como
     /// píxeles de su ventana (`ancho_bs` × `ALTO_BLUESTACKS`, con la forma de la pantalla de Android).
+    /// La curva `S` solo va en Free Fire, como en BlueStacks.
     ///
-    /// No recorta a la pantalla ni recentra mientras se mueve: el dedo puede salirse y Android lo
-    /// sigue aceptando. Como en BlueStacks, el dedo no se levanta aunque el mouse se quede quieto
-    /// (SwagPlayer lo levantaba tras `touchIdleTimeoutMs`, que aquí se ignora): solo al salir de la
-    /// puntería o al soltar el mapeo.
+    /// Como en BlueStacks, el dedo no se levanta aunque el mouse se quede quieto (SwagPlayer lo
+    /// levantaba tras `touchIdleTimeoutMs`, que aquí se ignora). Al salirse de la pantalla vuelve a
+    /// empezar en el ancla, salvo con `SIN_RECENTRAR` (el 16450 de Free Fire lo tiene): ahí el dedo
+    /// sigue fuera y Android lo acepta igual. Los demás bits de `tweaks` cambian cuándo vuelve a
+    /// empezar (ver `en_pantalla`).
     pub fn mover(&mut self, delta: Vec2, ctl: &Control, w: f32, h: f32) {
         if delta == Vec2::ZERO {
             return;
         }
         if let Some(m) = &self.mirada {
             if !self.mirada_con_teclado(m) {
-                let sens = match m.nodo.and_then(|i| self.mapa.as_ref()?.nodos.get(i)) {
+                let sens = match self.mapa.as_ref().and_then(|mapa| mapa.nodos.get(m.nodo)) {
                     Some(Nodo::MiradaLibre(n)) => n.velocidad,
-                    _ => self.mapa.as_ref().and_then(|m| m.raton.as_ref()).map_or(1.0, |r| r.sens),
+                    _ => 1.0,
                 };
                 let escala = sens * h / ALTO_BLUESTACKS as f32;
                 self.mover_mirada((delta.x * escala, delta.y * escala), ctl, w, h);
@@ -1515,31 +1649,98 @@ impl Motor {
         if !self.cursor_bloqueado() {
             return;
         }
-        // Aceleración: los movimientos rápidos (más cuentas por reporte) giran más.
-        let delta = if r.aceleracion { delta * (1.0 + delta.length().min(40.0) * 0.04) } else { delta };
-        let apunte = self.apunte.get_or_insert_with(|| {
-            let ancla = (r.inicio.x as f64 * w as f64, r.inicio.y as f64 * h as f64);
-            let punto = (ancla.0 as i32, ancla.1 as i32);
-            ctl.toque(BAJAR, ID_APUNTAR, punto.0, punto.1, w as u16, h as u16);
-            Apunte { ancla, acumulado: (0.0, 0.0), punto }
-        });
-        apunte.acumulado.0 += delta.x as f64;
-        apunte.acumulado.1 += delta.y as f64;
-        let (sens_x, sens_y) = (r.sens as f64, r.sens as f64 * r.ratio_y as f64);
-        let dx = if r.tweaks & MODO_ABSOLUTO != 0 {
-            curva::horizontal(sens_x * apunte.acumulado.0)
-        } else {
-            sens_x * apunte.acumulado.0
-        };
-        let dy = sens_y * apunte.acumulado.1;
-        // De píxeles de la ventana de BlueStacks a píxeles de Android.
+        let ahora = Instant::now();
+        match self.mirar {
+            // Mientras baja el dedo del ojo, y los 50 ms antes de que vuelva la cámara, el mouse no
+            // mueve nada (BlueStacks tampoco).
+            Some(Mirar::Bajando(_)) => return,
+            Some(Mirar::Volviendo(desde)) if ahora < desde => return,
+            Some(Mirar::Volviendo(_)) => self.mirar = None,
+            _ => {}
+        }
+        let t = r.tweaks;
+        let mirando = self.mirar == Some(Mirar::Mirando);
+        let delta = if r.aceleracion { Vec2::new(acelerar(delta.x), acelerar(delta.y)) } else { delta };
         let ancho_bs = ALTO_BLUESTACKS * w as f64 / h as f64;
-        let (dx, dy) = (dx / ancho_bs * w as f64, dy / ALTO_BLUESTACKS * h as f64);
-        // Se trunca hacia cero, como SwagPlayer.
-        let punto = ((apunte.ancla.0 + dx) as i32, (apunte.ancla.1 + dy) as i32);
+        let camara = Camara {
+            sens: (r.sens as f64, r.sens as f64 * r.ratio_y as f64),
+            curva: t & MODO_ABSOLUTO != 0 && self.paquete.starts_with("com.dts.freefire"),
+            ancho_bs,
+        };
+        let apunte = self.apunte.get_or_insert_with(|| {
+            let ancla = (r.inicio.x as f64 * 100.0, r.inicio.y as f64 * 100.0);
+            let punto = a_pixeles(ancla, w, h);
+            ctl.toque(BAJAR, ID_APUNTAR, punto.0, punto.1, w as u16, h as u16);
+            self.activos.insert(ID_APUNTAR, punto);
+            Apunte::nuevo(ID_APUNTAR, ancla, punto)
+        });
+        let d = (delta.x as f64, delta.y as f64);
+        apunte.acumulado.0 += d.0;
+        apunte.acumulado.1 += d.1;
+        apunte.quieto.1 += d.0.abs() + d.1.abs();
+        // Tras volver a empezar con `PAUSA_RECENTRAR`, el dedo baja otra vez en el ancla 20 ms después.
+        if !apunte.abajo {
+            if ahora < apunte.desde + Duration::from_millis(20) {
+                return;
+            }
+            apunte.abajo = true;
+            apunte.punto = a_pixeles(apunte.ancla, w, h);
+            ctl.toque(BAJAR, apunte.dedo, apunte.punto.0, apunte.punto.1, w as u16, h as u16);
+            self.activos.insert(apunte.dedo, apunte.punto);
+            return;
+        }
+        // Lo que se mueva antes se manda junto en el envío siguiente.
+        if t & LIMITAR_ENVIOS != 0 && ahora < apunte.envio + Duration::from_millis(8) {
+            return;
+        }
+        let mut p = camara.posicion(apunte.ancla, apunte.acumulado);
+        let dentro = en_pantalla(t, p, apunte.ancla);
+        if !dentro && mirando {
+            // Mirando alrededor, el ojo se queda en la orilla.
+            return;
+        }
+        let mut recentrar = !dentro;
+        if !mirando {
+            if t & RECENTRAR_QUIETO != 0 && ahora >= apunte.quieto.0 + Duration::from_millis(200) {
+                let lejos = (p.0 - apunte.ancla.0).abs() > 10.0 || (p.1 - apunte.ancla.1).abs() > 10.0;
+                recentrar |= lejos && apunte.quieto.1 < 50.0;
+                apunte.quieto = (ahora, 0.0);
+            }
+            recentrar |= t & RECENTRAR_SIEMPRE != 0 && ahora >= apunte.desde + Duration::from_millis(200);
+            if t & LIMITES != 0 {
+                // En píxeles de la ventana de BlueStacks, a cada lado del ancla.
+                let (dx, dy) = (p.0 - apunte.ancla.0, p.1 - apunte.ancla.1);
+                let (ancho, alto) = (100.0 / ancho_bs, 100.0 / ALTO_BLUESTACKS);
+                recentrar |= -dx > r.limite_izq as f64 * ancho
+                    || dx > r.limite_der as f64 * ancho
+                    || -dy > r.limite_arr as f64 * alto
+                    || dy > r.limite_aba as f64 * alto;
+            }
+        }
+        if recentrar {
+            // Vuelve a empezar: el dedo se levanta, baja otra vez en el ancla y sigue con lo que se
+            // movió el mouse ahora.
+            ctl.toque(SOLTAR, apunte.dedo, apunte.punto.0, apunte.punto.1, w as u16, h as u16);
+            self.activos.remove(&apunte.dedo);
+            apunte.acumulado = d;
+            apunte.desde = ahora;
+            if t & PAUSA_RECENTRAR != 0 {
+                apunte.abajo = false;
+                return;
+            }
+            let ancla = a_pixeles(apunte.ancla, w, h);
+            ctl.toque(BAJAR, apunte.dedo, ancla.0, ancla.1, w as u16, h as u16);
+            p = camara.posicion(apunte.ancla, apunte.acumulado);
+        }
+        if t & REDONDEAR != 0 {
+            // A píxeles enteros de la ventana de BlueStacks, truncando hacia cero como allá.
+            p = ((p.0 / 100.0 * ancho_bs).trunc() / ancho_bs * 100.0, (p.1 / 100.0 * ALTO_BLUESTACKS).trunc() / ALTO_BLUESTACKS * 100.0);
+        }
+        let punto = a_pixeles(p, w, h);
         apunte.punto = punto;
-        ctl.toque(MOVER, ID_APUNTAR, punto.0, punto.1, w as u16, h as u16);
-        self.activos.insert(ID_APUNTAR, punto);
+        apunte.envio = ahora;
+        ctl.toque(MOVER, apunte.dedo, punto.0, punto.1, w as u16, h as u16);
+        self.activos.insert(apunte.dedo, punto);
     }
 
     /// Temporizador: toques programados y todo lo que se mueve solo (D-pad con velocidad, zoom,
@@ -1555,6 +1756,10 @@ impl Motor {
         self.pendientes = faltan;
         for p in listos {
             self.tocar(ctl, p.accion, p.dedo, p.x, p.y, w, h);
+        }
+        // Mirar alrededor: el dedo del ojo baja 100 ms después de levantarse el de la cámara.
+        if matches!(self.mirar, Some(Mirar::Bajando(t)) if ahora >= t) {
+            self.bajar_ojo(ctl, w, h);
         }
         let Some(mapa) = self.mapa.clone() else { return };
         let nodo = |i: usize| mapa.nodos.get(i);
@@ -1593,7 +1798,7 @@ impl Motor {
                 self.tocar_f(ctl, BAJAR, ID_MIRADA, p, w, h);
             }
         }
-        if let Some(Some(Nodo::MiradaLibre(n))) = self.mirada.as_ref().and_then(|m| m.nodo).map(nodo) {
+        if let Some(Some(Nodo::MiradaLibre(n))) = self.mirada.as_ref().map(|m| nodo(m.nodo)) {
             if n.teclado {
                 let p = |k: &str| self.presionadas.contains_key(k) as i32 as f32;
                 let dir = (p(&n.derecha) - p(&n.izquierda), p(&n.abajo) - p(&n.arriba));
@@ -1749,6 +1954,7 @@ impl Motor {
             || self.dpads.values().any(|m| m.actual != m.objetivo)
             || !self.repetidos.is_empty()
             || self.mirada.is_some()
+            || matches!(self.mirar, Some(Mirar::Bajando(_)))
             || !self.scripts.is_empty()
             || !self.deslizar.is_empty()
             || self.zoom.is_some()
@@ -1799,13 +2005,55 @@ impl Motor {
         }
     }
 
+    /// Levanta los dedos de la puntería: el de la cámara (o el del ojo) y el de disparo.
     fn soltar_apunte(&mut self, ctl: &Control, w: f32, h: f32) {
-        if let Some(a) = self.apunte.take() {
-            self.tocar(ctl, SOLTAR, ID_APUNTAR, a.punto.0, a.punto.1, w, h);
-        }
+        self.levantar_apunte(ctl, w, h);
+        self.mirar = None;
         if let Some(pos) = self.disparo.take() {
             self.tocar(ctl, SOLTAR, ID_DISPARO, pos.x as i32, pos.y as i32, w, h);
         }
+    }
+
+    fn levantar_apunte(&mut self, ctl: &Control, w: f32, h: f32) {
+        if let Some(a) = self.apunte.take().filter(|a| a.abajo) {
+            self.tocar(ctl, SOLTAR, a.dedo, a.punto.0, a.punto.1, w, h);
+        }
+    }
+
+    /// Tecla de «Mirar alrededor» presionada: se levanta la cámara y el ojo baja en 100 ms (`tick`);
+    /// si la cámara todavía no había vuelto, el ojo baja ya.
+    fn empezar_mirar(&mut self, ctl: &Control, w: f32, h: f32) {
+        match self.mirar {
+            Some(Mirar::Bajando(_) | Mirar::Mirando) => {}
+            Some(Mirar::Volviendo(_)) => self.bajar_ojo(ctl, w, h),
+            None => {
+                self.levantar_apunte(ctl, w, h);
+                self.mirar = Some(Mirar::Bajando(Instant::now() + Duration::from_millis(100)));
+            }
+        }
+    }
+
+    /// Tecla de «Mirar alrededor» soltada: se levanta el ojo y la cámara vuelve con el primer
+    /// movimiento pasados 50 ms.
+    fn terminar_mirar(&mut self, ctl: &Control, w: f32, h: f32) {
+        if matches!(self.mirar, Some(Mirar::Bajando(_) | Mirar::Mirando)) {
+            self.levantar_apunte(ctl, w, h);
+            self.mirar = Some(Mirar::Volviendo(Instant::now() + Duration::from_millis(50)));
+        }
+    }
+
+    /// El dedo del ojo baja en «Posición de mirada libre» y desde ahí lo arrastra el mouse, con la
+    /// misma fórmula que la cámara.
+    fn bajar_ojo(&mut self, ctl: &Control, w: f32, h: f32) {
+        let Some(pos) = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).and_then(|r| r.mirada_pos) else {
+            self.mirar = None;
+            return;
+        };
+        let ancla = (pos.x as f64 * 100.0, pos.y as f64 * 100.0);
+        let punto = a_pixeles(ancla, w, h);
+        self.tocar(ctl, BAJAR, ID_OJO, punto.0, punto.1, w, h);
+        self.apunte = Some(Apunte::nuevo(ID_OJO, ancla, punto));
+        self.mirar = Some(Mirar::Mirando);
     }
 
     /// Recalcula hacia dónde va el D-pad según sus teclas (y el modificador de velocidad).
@@ -1847,7 +2095,7 @@ impl Motor {
         }
     }
 
-    fn empezar_mirada(&mut self, nodo: Option<usize>, ancla: (f32, f32), ctl: &Control, w: f32, h: f32) {
+    fn empezar_mirada(&mut self, nodo: usize, ancla: (f32, f32), ctl: &Control, w: f32, h: f32) {
         if self.mirada.is_some() {
             self.terminar_mirada(ctl, w, h);
         }
@@ -1862,7 +2110,7 @@ impl Motor {
     }
 
     fn mover_mirada(&mut self, d: (f32, f32), ctl: &Control, w: f32, h: f32) {
-        let espera = match self.mirada.as_ref().and_then(|m| m.nodo).and_then(|i| self.mapa.as_ref()?.nodos.get(i)) {
+        let espera = match self.mirada.as_ref().and_then(|m| self.mapa.as_ref()?.nodos.get(m.nodo)) {
             Some(Nodo::MiradaLibre(n)) => n.espera_orilla_ms,
             _ => 300,
         };
@@ -2152,6 +2400,7 @@ mod pruebas {
         (r.sens, r.ratio_y) = (1.35, 1.15);
         let mut motor = Motor::new();
         motor.mapa = Some(Mapa { raton: Some(r), ..Mapa::default() });
+        motor.paquete = "com.dts.freefireth".into();
         motor.apuntando = true;
         let (w, h) = (1280.0, 720.0);
         for d in [Vec2::new(10.0, 0.0), Vec2::new(0.0, 10.0), Vec2::new(-400.0, 3.0)] {
@@ -2170,8 +2419,9 @@ mod pruebas {
             })
             .collect();
         // Calculado aparte en Python con el spline: x = 1015.9 + S(1.35·acum_x) · 1280/1777.8,
-        // y = 352.8 + 1.5525·acum_y · 720/1000, acumulando (10, 0), (10, 10) y (−390, 13).
-        assert_eq!(toques, vec![(BAJAR, 1015, 352), (MOVER, 1024, 352), (MOVER, 1024, 363), (MOVER, 855, 367)]);
+        // y = 352.8 + 1.5525·acum_y · 720/1000, acumulando (10, 0), (10, 10) y (−390, 13), y
+        // truncado a píxeles de la ventana de BlueStacks (el 64 de 16450): 1187.8 → 1187 → 854.
+        assert_eq!(toques, vec![(BAJAR, 1015, 352), (MOVER, 1024, 352), (MOVER, 1024, 363), (MOVER, 854, 367)]);
     }
 
     /// Corre `pasos` con un control falso y devuelve los toques que habría mandado: (acción, x, y).
@@ -2217,6 +2467,73 @@ mod pruebas {
 
     const W: f32 = 1280.0;
     const H: f32 = 720.0;
+
+    /// La aceleración de BlueStacks con la curva de fábrica de Windows (calculada a mano).
+    #[test]
+    fn aceleracion_como_bluestacks() {
+        let casos = [(0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (3.0, 2.0), (4.0, 3.0), (5.0, 4.0), (10.0, 9.0), (20.0, 27.0), (50.0, 91.0), (-5.0, -4.0)];
+        for (cuentas, esperado) in casos {
+            assert_eq!(acelerar(cuentas), esperado, "{cuentas} cuentas");
+        }
+        // Pasado el último punto sigue creciendo (BlueStacks daba 0).
+        assert!(acelerar(200.0) > acelerar(140.0));
+    }
+
+    fn puntero(ancla: (f32, f32), tweaks: u32) -> Raton {
+        let mut r = Raton::nuevo(Punto::nuevo(ancla.0, ancla.1));
+        (r.sens, r.ratio_y, r.tweaks) = (1.0, 1.0, tweaks);
+        r
+    }
+
+    /// Sin «Ajustes», al salirse de la pantalla el dedo se levanta, baja otra vez en el ancla y sigue
+    /// con el movimiento de ese momento; con `SIN_RECENTRAR`, sigue afuera.
+    #[test]
+    fn recentra_al_salirse_de_la_pantalla() {
+        // 101 cuentas = 5.68125 % del ancho en una pantalla de 16:9; el ancla en 93.75 %.
+        let mover_dos_veces = |motor: &mut Motor, ctl: &Control| {
+            motor.apuntando = true;
+            motor.mover(Vec2::new(101.0, 0.0), ctl, W, H);
+            motor.mover(Vec2::new(101.0, 0.0), ctl, W, H);
+        };
+        let eventos = toques(Mapa { raton: Some(puntero((0.9375, 0.5), 0)), ..Mapa::default() }, mover_dos_veces);
+        assert_eq!(eventos, vec![(BAJAR, 1200, 360), (MOVER, 1272, 360), (SOLTAR, 1272, 360), (BAJAR, 1200, 360), (MOVER, 1272, 360)]);
+        let eventos = toques(Mapa { raton: Some(puntero((0.9375, 0.5), SIN_RECENTRAR)), ..Mapa::default() }, mover_dos_veces);
+        assert_eq!(eventos, vec![(BAJAR, 1200, 360), (MOVER, 1272, 360), (MOVER, 1345, 360)]);
+    }
+
+    /// «Mirar alrededor» como BlueStacks: se levanta la cámara, el ojo baja 100 ms después y el mouse
+    /// lo arrastra; al soltar la tecla, la cámara vuelve con el primer movimiento pasados 50 ms.
+    #[test]
+    fn mirar_alrededor_como_bluestacks() {
+        let mut r = puntero((0.75, 0.5), SIN_RECENTRAR);
+        r.mirada_tecla = Some("Key_Alt".into());
+        r.mirada_pos = Some(Punto::nuevo(0.5, 0.25));
+        let eventos = toques(Mapa { raton: Some(r), ..Mapa::default() }, |motor, ctl| {
+            motor.apuntando = true;
+            motor.mover(Vec2::new(101.0, 0.0), ctl, W, H);
+            motor.tecla("Key_Alt", true, false, ctl, W, H);
+            motor.mover(Vec2::new(50.0, 0.0), ctl, W, H);
+            esperar(motor, ctl, 130);
+            motor.mover(Vec2::new(101.0, 0.0), ctl, W, H);
+            motor.tecla("Key_Alt", false, false, ctl, W, H);
+            motor.mover(Vec2::new(10.0, 0.0), ctl, W, H);
+            std::thread::sleep(Duration::from_millis(60));
+            motor.mover(Vec2::new(101.0, 0.0), ctl, W, H);
+        });
+        assert_eq!(
+            eventos,
+            vec![
+                (BAJAR, 960, 360),
+                (MOVER, 1032, 360),
+                (SOLTAR, 1032, 360),
+                (BAJAR, 640, 180),
+                (MOVER, 712, 180),
+                (SOLTAR, 712, 180),
+                (BAJAR, 960, 360),
+                (MOVER, 1032, 360),
+            ]
+        );
+    }
 
     #[test]
     fn tick_inactivo_actualiza_reloj_y_respeta_toques_pendientes() {
