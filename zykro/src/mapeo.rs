@@ -106,6 +106,9 @@ pub struct Raton {
     pub mirada_tecla: Option<String>,
     #[serde(rename = "freeLookPos", default, skip_serializing_if = "Option::is_none")]
     pub mirada_pos: Option<Punto>,
+    /// La pestaña «Gamepad».
+    #[serde(rename = "gamepad", default)]
+    pub mando: MandoApuntar,
     /// `speedRatio*`, `smoothAlpha*`, `velocityCurveK`, `ads*`... van aquí: SwagPlayer no los usa para
     /// mover la cámara, así que ZYKRO tampoco.
     #[serde(flatten)]
@@ -144,8 +147,57 @@ impl Raton {
             mostrar: true,
             mirada_tecla: None,
             mirada_pos: None,
+            mando: MandoApuntar::default(),
             extra,
         }
+    }
+}
+
+/// La pestaña «Gamepad» de la puntería, como la de BlueStacks: un joystick mueve la cámara (con su
+/// propia sensibilidad) y los botones del mando hacen lo que las teclas (`KeyStartStop_alt1`…), más
+/// uno para disparar. Con algo asignado, el mando lo usa el mapeo y no le llega a Android.
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
+pub struct MandoApuntar {
+    /// `LeftStick`, `RightStick` o vacío.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub stick: String,
+    #[serde(rename = "sensitivity", default = "uno")]
+    pub sens: f32,
+    /// Zona muerta del joystick, en % de su recorrido.
+    #[serde(rename = "deadzone", default = "quince")]
+    pub zona_muerta: f32,
+    #[serde(rename = "startStopKey", default, skip_serializing_if = "String::is_empty")]
+    pub iniciar: String,
+    #[serde(rename = "suspendKey", default, skip_serializing_if = "String::is_empty")]
+    pub suspender: String,
+    #[serde(rename = "freeLookKey", default, skip_serializing_if = "String::is_empty")]
+    pub mirar: String,
+    #[serde(rename = "fireKey", default, skip_serializing_if = "String::is_empty")]
+    pub disparar: String,
+}
+
+fn quince() -> f32 {
+    15.0
+}
+
+impl Default for MandoApuntar {
+    fn default() -> Self {
+        MandoApuntar {
+            stick: String::new(),
+            sens: 1.0,
+            zona_muerta: quince(),
+            iniciar: String::new(),
+            suspender: String::new(),
+            mirar: String::new(),
+            disparar: String::new(),
+        }
+    }
+}
+
+impl MandoApuntar {
+    /// Sin joystick ni botones: el mando llega directo a Android.
+    pub fn vacio(&self) -> bool {
+        self.stick.is_empty() && [&self.iniciar, &self.suspender, &self.mirar, &self.disparar].iter().all(|b| b.is_empty())
     }
 }
 
@@ -840,8 +892,32 @@ pub fn nombre_boton(b: PointerButton) -> &'static str {
     }
 }
 
+/// Los botones del mando con sus nombres de BlueStacks (los del archivo) y como se muestran.
+pub const BOTONES_MANDO: [(&str, &str); 17] = [
+    ("GamepadA", "A"),
+    ("GamepadB", "B"),
+    ("GamepadX", "X"),
+    ("GamepadY", "Y"),
+    ("GamepadLeftShoulder", "LB"),
+    ("GamepadRightShoulder", "RB"),
+    ("GamepadLeftTrigger", "LT"),
+    ("GamepadRightTrigger", "RT"),
+    ("GamepadBack", "Back"),
+    ("GamepadStart", "Start"),
+    ("GamepadGuide", "Guía"),
+    ("GamepadLeftThumb", "L3"),
+    ("GamepadRightThumb", "R3"),
+    ("GamepadDpadUp", "Cruceta arriba"),
+    ("GamepadDpadDown", "Cruceta abajo"),
+    ("GamepadDpadLeft", "Cruceta izq."),
+    ("GamepadDpadRight", "Cruceta der."),
+];
+
 /// Texto corto para mostrar la tecla en pantalla.
 pub fn etiqueta(nombre: &str) -> String {
+    if let Some((_, texto)) = BOTONES_MANDO.iter().find(|(n, _)| *n == nombre) {
+        return texto.to_string();
+    }
     match nombre {
         "Key_Space" => "Espacio".into(),
         "Key_Shift" => "Shift".into(),
@@ -913,7 +989,8 @@ struct Apunte {
     dedo: u64,
     /// Donde se bajó el dedo, en % de la pantalla.
     ancla: (f64, f64),
-    /// Cuentas del mouse desde que se bajó el dedo (o desde que volvió a empezar).
+    /// Cuentas del mouse (o del joystick) desde que se bajó el dedo o volvió a empezar, ya por la
+    /// sensibilidad de cada uno: así se pueden mezclar sin saltos.
     acumulado: (f64, f64),
     /// Último punto mandado, en píxeles de Android.
     punto: (i32, i32),
@@ -936,17 +1013,15 @@ impl Apunte {
 
 /// La cámara de BlueStacks (ver `Motor::mover`).
 struct Camara {
-    sens: (f64, f64),
     curva: bool,
     ancho_bs: f64,
 }
 
 impl Camara {
-    /// Dónde va el dedo (en % de la pantalla) con `acumulado` cuentas del mouse desde `ancla`.
+    /// Dónde va el dedo (en % de la pantalla) con `acumulado` (cuentas por sensibilidad) desde `ancla`.
     fn posicion(&self, ancla: (f64, f64), acumulado: (f64, f64)) -> (f64, f64) {
-        let dx = self.sens.0 * acumulado.0;
-        let dx = if self.curva { curva::horizontal(dx) } else { dx };
-        (ancla.0 + dx / self.ancho_bs * 100.0, ancla.1 + self.sens.1 * acumulado.1 / ALTO_BLUESTACKS * 100.0)
+        let dx = if self.curva { curva::horizontal(acumulado.0) } else { acumulado.0 };
+        (ancla.0 + dx / self.ancho_bs * 100.0, ancla.1 + acumulado.1 / ALTO_BLUESTACKS * 100.0)
     }
 }
 
@@ -1498,24 +1573,8 @@ impl Motor {
     /// manual apuntando, la lanza.
     pub fn boton(&mut self, boton: PointerButton, presionado: bool, ctl: &Control, w: f32, h: f32) -> bool {
         let nombre = nombre_boton(boton);
-        let bajando_ojo = matches!(self.mirar, Some(Mirar::Bajando(_)));
-        if boton == PointerButton::Primary && self.cursor_bloqueado() && self.mirada.is_none() && !bajando_ojo {
-            let disparo = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).filter(|r| r.disparo_con_clic).and_then(|r| r.disparo);
-            if let Some(p) = disparo {
-                if presionado && self.disparo.is_some() {
-                    return true;
-                }
-                if presionado {
-                    // Como SwagPlayer: el dedo de disparo se queda quieto y la cámara sigue moviéndose
-                    // (subir el mouse mientras disparas levanta la mira).
-                    let pos = Vec2::new(p.x * w, p.y * h);
-                    self.tocar(ctl, BAJAR, ID_DISPARO, pos.x as i32, pos.y as i32, w, h);
-                    self.disparo = Some(pos);
-                } else if let Some(pos) = self.disparo.take() {
-                    self.tocar(ctl, SOLTAR, ID_DISPARO, pos.x as i32, pos.y as i32, w, h);
-                }
-                return true;
-            }
+        if boton == PointerButton::Primary && self.disparar(presionado, ctl, w, h) {
+            return true;
         }
         if boton == PointerButton::Primary && self.captura_clic() {
             if presionado {
@@ -1527,6 +1586,82 @@ impl Motor {
             return true;
         }
         self.tecla(nombre, presionado, false, ctl, w, h)
+    }
+
+    /// El dedo de disparo de la puntería (clic izquierdo o el botón del mando). Devuelve si lo usó.
+    fn disparar(&mut self, presionado: bool, ctl: &Control, w: f32, h: f32) -> bool {
+        let bajando_ojo = matches!(self.mirar, Some(Mirar::Bajando(_)));
+        if !self.cursor_bloqueado() || self.mirada.is_some() || bajando_ojo {
+            return false;
+        }
+        let disparo = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).filter(|r| r.disparo_con_clic).and_then(|r| r.disparo);
+        let Some(p) = disparo else { return false };
+        if presionado && self.disparo.is_none() {
+            // Como SwagPlayer: el dedo de disparo se queda quieto y la cámara sigue moviéndose (subir
+            // el mouse mientras disparas levanta la mira).
+            let pos = Vec2::new(p.x * w, p.y * h);
+            self.tocar(ctl, BAJAR, ID_DISPARO, pos.x as i32, pos.y as i32, w, h);
+            self.disparo = Some(pos);
+        } else if !presionado {
+            if let Some(pos) = self.disparo.take() {
+                self.tocar(ctl, SOLTAR, ID_DISPARO, pos.x as i32, pos.y as i32, w, h);
+            }
+        }
+        true
+    }
+
+    /// La puntería tiene algo en la pestaña «Gamepad»: el mando lo usa el mapeo y no Android.
+    pub fn usa_mando(&self) -> bool {
+        self.mapa.as_ref().and_then(|m| m.raton.as_ref()).is_some_and(|r| !r.mando.vacio())
+    }
+
+    /// El joystick de la puntería (`LeftStick`, `RightStick` o vacío) y su zona muerta (de 0 a 1).
+    pub fn joystick_mando(&self) -> Option<(String, f32)> {
+        let m = &self.mapa.as_ref()?.raton.as_ref()?.mando;
+        (!m.stick.is_empty()).then(|| (m.stick.clone(), (m.zona_muerta / 100.0).clamp(0.0, 0.95)))
+    }
+
+    /// Un botón del mando (`GamepadA`, `GamepadRightThumb`… como en BlueStacks), con lo que tenga en
+    /// la pestaña «Gamepad»: lo mismo que su tecla, o disparar.
+    pub fn boton_mando(&mut self, nombre: &str, presionado: bool) {
+        let Some((ctl, w, h)) = self.salida.clone() else { return };
+        let Some(m) = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).map(|r| r.mando.clone()) else { return };
+        if nombre == m.iniciar {
+            if presionado {
+                self.alternar_punteria(&ctl, w, h);
+            }
+        } else if nombre == m.suspender {
+            if !matches!(self.mirar, Some(Mirar::Bajando(_) | Mirar::Mirando)) {
+                self.pausa = presionado && self.apuntando;
+                if self.pausa {
+                    self.soltar_apunte(&ctl, w, h);
+                }
+            }
+        } else if nombre == m.mirar {
+            let hay_ojo = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).is_some_and(|r| r.mirada_pos.is_some());
+            if hay_ojo && self.apuntando && !self.pausa {
+                if presionado {
+                    self.empezar_mirar(&ctl, w, h);
+                } else {
+                    self.terminar_mirar(&ctl, w, h);
+                }
+            }
+        } else if nombre == m.disparar {
+            self.disparar(presionado, &ctl, w, h);
+        }
+    }
+
+    /// El joystick de la puntería, cada 10 ms (de −1 a 1, ya sin la zona muerta; Y hacia abajo).
+    /// Como BlueStacks: es como mover el mouse `palanca × 20` cuentas, con la sensibilidad del mando.
+    pub fn joystick(&mut self, palanca: Vec2) {
+        let Some((ctl, w, h)) = self.salida.clone() else { return };
+        let Some(r) = self.mapa.as_ref().and_then(|m| m.raton.as_ref()) else { return };
+        let sens = r.mando.sens as f64;
+        let sens = (sens, sens * r.ratio_y as f64);
+        let delta = Vec2::new((palanca.x * 20.0).trunc(), (palanca.y * 20.0).trunc());
+        if delta != Vec2::ZERO && self.apuntando && !self.pausa {
+            self.mover_camara(delta, sens, &ctl, w, h);
+        }
     }
 
     /// Rueda del mouse (`pasos` > 0 hacia arriba). Devuelve si un control la usó (si no, desplaza
@@ -1646,6 +1781,13 @@ impl Motor {
             }
         }
         let Some(r) = self.mapa.as_ref().and_then(|m| m.raton.as_ref()) else { return };
+        let sens = (r.sens as f64, r.sens as f64 * r.ratio_y as f64);
+        self.mover_camara(delta, sens, ctl, w, h);
+    }
+
+    /// La cámara (o el ojo) con `delta` cuentas del mouse o del joystick y su sensibilidad en X e Y.
+    fn mover_camara(&mut self, delta: Vec2, sens: (f64, f64), ctl: &Control, w: f32, h: f32) {
+        let Some(r) = self.mapa.as_ref().and_then(|m| m.raton.as_ref()) else { return };
         if !self.cursor_bloqueado() {
             return;
         }
@@ -1662,11 +1804,7 @@ impl Motor {
         let mirando = self.mirar == Some(Mirar::Mirando);
         let delta = if r.aceleracion { Vec2::new(acelerar(delta.x), acelerar(delta.y)) } else { delta };
         let ancho_bs = ALTO_BLUESTACKS * w as f64 / h as f64;
-        let camara = Camara {
-            sens: (r.sens as f64, r.sens as f64 * r.ratio_y as f64),
-            curva: t & MODO_ABSOLUTO != 0 && self.paquete.starts_with("com.dts.freefire"),
-            ancho_bs,
-        };
+        let camara = Camara { curva: t & MODO_ABSOLUTO != 0 && self.paquete.starts_with("com.dts.freefire"), ancho_bs };
         let apunte = self.apunte.get_or_insert_with(|| {
             let ancla = (r.inicio.x as f64 * 100.0, r.inicio.y as f64 * 100.0);
             let punto = a_pixeles(ancla, w, h);
@@ -1674,10 +1812,10 @@ impl Motor {
             self.activos.insert(ID_APUNTAR, punto);
             Apunte::nuevo(ID_APUNTAR, ancla, punto)
         });
-        let d = (delta.x as f64, delta.y as f64);
+        let d = (delta.x as f64 * sens.0, delta.y as f64 * sens.1);
         apunte.acumulado.0 += d.0;
         apunte.acumulado.1 += d.1;
-        apunte.quieto.1 += d.0.abs() + d.1.abs();
+        apunte.quieto.1 += (delta.x.abs() + delta.y.abs()) as f64;
         // Tras volver a empezar con `PAUSA_RECENTRAR`, el dedo baja otra vez en el ancla 20 ms después.
         if !apunte.abajo {
             if ahora < apunte.desde + Duration::from_millis(20) {
@@ -2499,6 +2637,39 @@ mod pruebas {
         assert_eq!(eventos, vec![(BAJAR, 1200, 360), (MOVER, 1272, 360), (SOLTAR, 1272, 360), (BAJAR, 1200, 360), (MOVER, 1272, 360)]);
         let eventos = toques(Mapa { raton: Some(puntero((0.9375, 0.5), SIN_RECENTRAR)), ..Mapa::default() }, mover_dos_veces);
         assert_eq!(eventos, vec![(BAJAR, 1200, 360), (MOVER, 1272, 360), (MOVER, 1345, 360)]);
+    }
+
+    /// La pestaña «Gamepad»: un botón entra a la puntería, el joystick gira la cámara con su propia
+    /// sensibilidad (como mover el mouse `palanca × 20` cuentas), se mezcla con el mouse sin saltos y
+    /// el gatillo dispara.
+    #[test]
+    fn mando_como_bluestacks() {
+        let mut r = puntero((0.75, 0.5), SIN_RECENTRAR);
+        r.sens = 2.0;
+        r.disparo = Some(Punto::nuevo(0.875, 0.75));
+        r.mando = MandoApuntar {
+            stick: "RightStick".into(),
+            iniciar: "GamepadRightThumb".into(),
+            disparar: "GamepadRightTrigger".into(),
+            ..MandoApuntar::default()
+        };
+        let eventos = toques(Mapa { raton: Some(r), ..Mapa::default() }, |motor, ctl| {
+            motor.fijar_salida(Some(ctl.clone()), W, H);
+            assert!(motor.usa_mando());
+            motor.joystick(Vec2::new(0.5, 0.0));
+            assert!(!motor.apuntando, "sin entrar a la puntería, el joystick no hace nada");
+            motor.boton_mando("GamepadRightThumb", true);
+            motor.boton_mando("GamepadRightThumb", false);
+            assert!(motor.apuntando);
+            motor.joystick(Vec2::new(0.5, 0.0));
+            motor.mover(Vec2::new(10.0, 0.0), ctl, W, H);
+            motor.boton_mando("GamepadRightTrigger", true);
+            motor.boton_mando("GamepadRightTrigger", false);
+            // Si el motor se queda con su copia del canal, la prueba no termina de leerlo.
+            motor.fijar_salida(None, W, H);
+        });
+        // 10 cuentas × 1 (mando) = 0.5625 % del ancho → 967; luego 10 × 2 (mouse) → 30 en total → 981.
+        assert_eq!(eventos, vec![(BAJAR, 960, 360), (MOVER, 967, 360), (MOVER, 981, 360), (BAJAR, 1120, 540), (SOLTAR, 1120, 540)]);
     }
 
     /// «Mirar alrededor» como BlueStacks: se levanta la cámara, el ojo baja 100 ms después y el mouse

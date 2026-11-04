@@ -371,6 +371,7 @@ impl Zykro {
         let raton_directo = Arc::new(AtomicBool::new(false));
         let raton_listo = Arc::new(AtomicBool::new(false));
         raton::iniciar(motor.clone(), raton_directo.clone(), raton_listo.clone());
+        let _ = gamepad::MOTOR.set(motor.clone());
         let logo = {
             let (rgba, w, h) = decodificar_png(ICONO_PNG);
             let imagen = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
@@ -868,6 +869,8 @@ impl Zykro {
             && !self.confirmar_cierre
             && !self.recientes.abierto()
             && enfocada;
+        // Antes de soltar los dedos: que el hilo del mando no los vuelva a poner.
+        gamepad::MAPEO.store(activo, Ordering::Relaxed);
         if self.mapeo_activo && !activo {
             if let Some(c) = &control {
                 motor.soltar_todo(c, w, h);
@@ -953,6 +956,14 @@ impl Zykro {
             }
         }
         self.mods_previos = mods;
+        // Un botón del mando, para los campos de la pestaña «Gamepad» (los de antes se descartan). El
+        // mando no despierta a la ventana: mientras espera uno, se revisa cada 50 ms.
+        if let Some(boton) = gamepad::tomar_boton().filter(|_| self.editor.esperando_mando()) {
+            self.editor.tecla(boton);
+        }
+        if self.editor.esperando_mando() {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
         // Escribiendo en un campo (el color de la mira, un script), Supr y las letras son del campo.
         let escribiendo = ctx.egui_wants_keyboard_input() && !self.editor.esperando_tecla();
         for evento in eventos {

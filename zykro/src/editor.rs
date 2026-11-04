@@ -60,6 +60,17 @@ enum Objetivo {
     Cambio,
     Pausa,
     Ojo,
+    /// Un botón de la pestaña «Gamepad» de la puntería.
+    Mando(CampoMando),
+}
+
+/// Los botones de la pestaña «Gamepad» de la puntería.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum CampoMando {
+    Iniciar,
+    Suspender,
+    Mirar,
+    Disparar,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -570,8 +581,9 @@ pub struct Editor {
     /// Nombre del esquema nuevo que se está escribiendo.
     nombre_esquema: Option<String>,
     aviso: Option<String>,
-    /// La ventana «Ajustes de apuntar, desplazar y disparar» está abierta.
+    /// La ventana «Ajustes de apuntar, desplazar y disparar» está abierta, y en qué pestaña.
     ajustes_apuntar: bool,
+    pestana_mando: bool,
     /// Por qué no se pudo usar la imagen elegida para la mira.
     error_mira: Option<String>,
 }
@@ -592,6 +604,7 @@ impl Editor {
             nombre_esquema: None,
             aviso: None,
             ajustes_apuntar: false,
+            pestana_mando: false,
             error_mira: None,
         }
     }
@@ -603,6 +616,7 @@ impl Editor {
         self.elegida = None;
         self.esperando = None;
         self.ajustes_apuntar = false;
+        self.pestana_mando = false;
         self.error_mira = None;
         self.nombre_esquema = None;
         self.aviso = None;
@@ -614,6 +628,11 @@ impl Editor {
         self.esperando.is_some()
     }
 
+    /// Espera un botón del mando (los de la pestaña «Gamepad»).
+    pub fn esperando_mando(&self) -> bool {
+        matches!(self.esperando, Some(Objetivo::Mando(_)))
+    }
+
     /// Tecla presionada mientras el editor está abierto.
     pub fn tecla(&mut self, nombre: &str) {
         let Some(obj) = self.esperando.take() else {
@@ -623,6 +642,13 @@ impl Editor {
             return;
         };
         if nombre == "Key_Escape" {
+            return;
+        }
+        // Los campos del mando solo aceptan botones del mando (y Retroceso, que lo quita); los demás,
+        // solo teclas y el mouse.
+        let del_mando = nombre.starts_with("Gamepad");
+        if matches!(obj, Objetivo::Mando(_)) != del_mando && nombre != "Key_Backspace" {
+            self.esperando = Some(obj);
             return;
         }
         // Retroceso deja sin tecla las que son opcionales (modificadores, cancelar).
@@ -642,6 +668,17 @@ impl Editor {
             Objetivo::Ojo => {
                 if let Some(r) = &mut self.mapa.raton {
                     r.mirada_tecla = (!n.is_empty()).then_some(n);
+                }
+            }
+            Objetivo::Mando(campo) => {
+                if let Some(r) = &mut self.mapa.raton {
+                    let m = &mut r.mando;
+                    *match campo {
+                        CampoMando::Iniciar => &mut m.iniciar,
+                        CampoMando::Suspender => &mut m.suspender,
+                        CampoMando::Mirar => &mut m.mirar,
+                        CampoMando::Disparar => &mut m.disparar,
+                    } = n;
                 }
             }
         }
@@ -903,7 +940,11 @@ impl Editor {
         }
         self.ventana_apuntar(ui.ctx(), rect);
         if self.esperando.is_some() {
-            let aviso = "Presiona una tecla o botón del mouse  ·  Esc cancela  ·  Retroceso la quita";
+            let aviso = if self.esperando_mando() {
+                "Presiona un botón del mando  ·  Esc cancela  ·  Retroceso lo quita"
+            } else {
+                "Presiona una tecla o botón del mouse  ·  Esc cancela  ·  Retroceso la quita"
+            };
             let pos = rect.center_top() + Vec2::new(0.0, 28.0);
             let galeria = painter.layout_no_wrap(aviso.into(), FontId::proportional(14.0), Color32::WHITE);
             let caja = Rect::from_center_size(pos, galeria.size() + Vec2::new(24.0, 14.0));
@@ -1356,10 +1397,24 @@ impl Editor {
                         cerrar = crate::icono(ui, ic::X, "Cerrar", Vec2::new(24.0, 22.0), crate::CERRAR_HOVER).clicked();
                     });
                 });
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    for (mando, texto) in [(false, "Teclado y mouse"), (true, "Gamepad")] {
+                        if pestana(ui, self.pestana_mando == mando, texto) {
+                            self.pestana_mando = mando;
+                            self.esperando = None;
+                        }
+                    }
+                });
                 let Some(r) = self.mapa.raton.as_mut() else { return };
                 let esperando = &mut self.esperando;
                 let error_mira = &self.error_mira;
-                egui::ScrollArea::vertical().max_height((area.height() - 100.0).max(160.0)).show(ui, |ui| {
+                let pestana_mando = self.pestana_mando;
+                egui::ScrollArea::vertical().max_height((area.height() - 130.0).max(160.0)).show(ui, |ui| {
+                    if pestana_mando {
+                        ajustes_mando(ui, r, esperando);
+                        return;
+                    }
                     seccion(ui, "Atajos de teclado");
                     let pausa = r.tecla_pausa.clone().unwrap_or_default();
                     rejilla(ui, "apuntar-teclas", |ui| {
@@ -1507,6 +1562,77 @@ impl Editor {
     }
 }
 
+/// La pestaña «Gamepad» de la puntería, como la de BlueStacks (más un botón para disparar).
+fn ajustes_mando(ui: &mut egui::Ui, r: &mut Raton, esperando: &mut Option<Objetivo>) {
+    let m = &mut r.mando;
+    seccion(ui, "Atajos del mando");
+    let (iniciar, suspender, mirar, disparar) = (m.iniciar.clone(), m.suspender.clone(), m.mirar.clone(), m.disparar.clone());
+    rejilla(ui, "mando-teclas", |ui| {
+        fila(ui, "Iniciar/Detener", |ui| selector_tecla(ui, esperando, &iniciar, Objetivo::Mando(CampoMando::Iniciar)));
+        fila(ui, "Suspender", |ui| selector_tecla(ui, esperando, &suspender, Objetivo::Mando(CampoMando::Suspender)));
+    });
+
+    seccion(ui, "Propiedades");
+    rejilla(ui, "mando-propiedades", |ui| {
+        fila(ui, "Joystick", |ui| {
+            let opciones = [("", "Ninguno"), ("LeftStick", "Izquierdo"), ("RightStick", "Derecho")];
+            let actual = opciones.iter().find(|o| o.0 == m.stick).map_or("Ninguno", |o| o.1);
+            egui::ComboBox::from_id_salt("joystick-mando").selected_text(actual).show_ui(ui, |ui| {
+                for (valor, nombre) in opciones {
+                    if ui.selectable_label(m.stick == valor, nombre).clicked() {
+                        m.stick = valor.to_string();
+                    }
+                }
+            });
+        });
+        fila(ui, "Sensibilidad del mando", |ui| {
+            decimal(ui, &mut m.sens, 0.01..=100.0);
+        });
+        fila(ui, "Zona muerta", |ui| {
+            ui.add(egui::DragValue::new(&mut m.zona_muerta).range(0.0..=90.0).speed(0.5).fixed_decimals(0).suffix(" %"));
+        });
+    });
+    nota(ui, "El joystick gira la cámara como el mouse, con su propia sensibilidad; dentro de la zona muerta no la mueve.");
+
+    seccion(ui, "Disparar");
+    if r.disparo_con_clic {
+        rejilla(ui, "mando-disparo", |ui| {
+            fila(ui, "Disparar", |ui| selector_tecla(ui, esperando, &disparar, Objetivo::Mando(CampoMando::Disparar)));
+        });
+        nota(ui, "Toca la posición de acción de la pestaña «Teclado y mouse».");
+    } else {
+        nota(ui, "Para disparar con el mando, prende «Disparar con clic izquierdo» en la pestaña «Teclado y mouse».");
+    }
+
+    seccion(ui, "Mirar alrededor");
+    if r.mirada_pos.is_some() {
+        rejilla(ui, "mando-mirar", |ui| {
+            fila(ui, "Mirada libre", |ui| selector_tecla(ui, esperando, &mirar, Objetivo::Mando(CampoMando::Mirar)));
+        });
+    } else {
+        nota(ui, "Para mirar alrededor con el mando, prende «Mirar alrededor» en la pestaña «Teclado y mouse».");
+    }
+
+    ui.add_space(4.0);
+    let conectados = crate::gamepad::CONECTADOS.lock().unwrap().clone();
+    nota(ui, &if conectados.is_empty() { "No hay ningún mando conectado.".to_string() } else { format!("Mandos: {}.", conectados.join(", ")) });
+    nota(
+        ui,
+        "Con un joystick o un botón asignado, el mando mueve la puntería y deja de llegarle a Android mientras juegas este juego. La posición, la mira y «Ajustes» son los de la otra pestaña.",
+    );
+}
+
+/// Una pestaña de la ventana, subrayada si es la elegida (como las de BlueStacks). Devuelve si se tocó.
+fn pestana(ui: &mut egui::Ui, elegida: bool, texto: &str) -> bool {
+    let galeria = ui.painter().layout_no_wrap(texto.to_string(), FontId::proportional(13.0), Color32::WHITE);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(galeria.size().x + 20.0, 28.0), Sense::click());
+    let color = if elegida || resp.hovered() { TEXTO } else { TENUE };
+    ui.painter().galley_with_override_text_color(rect.center() - galeria.size() / 2.0, galeria, color);
+    let linea = Rect::from_min_max(Pos2::new(rect.min.x, rect.max.y - 2.0), rect.max);
+    ui.painter().rect_filled(linea, 1.0, if elegida { ACENTO } else { FONDO_HOVER });
+    resp.clicked()
+}
+
 /// Lo que hace cada bit de «Ajustes» (los `Tweaks` de BlueStacks) que ZYKRO entiende.
 const AYUDA_AJUSTES: &str = "Comportamientos de BlueStacks, sumados (los «Tweaks»).\n\
     0: lo normal: al salirse de la pantalla, el dedo vuelve a empezar en X, Y.\n\
@@ -1574,7 +1700,7 @@ fn selector_tecla(ui: &mut egui::Ui, esperando: &mut Option<Objetivo>, tecla: &s
     let texto = if activo {
         "Presiona…".to_string()
     } else if tecla.is_empty() {
-        "Sin tecla".to_string()
+        if matches!(objetivo, Objetivo::Mando(_)) { "Sin botón" } else { "Sin tecla" }.to_string()
     } else {
         etiqueta(tecla)
     };

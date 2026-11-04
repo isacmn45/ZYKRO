@@ -24,13 +24,16 @@ teclas y una puntería que se siente como la de BlueStacks. Todo lo que hay entr
   desplazar y disparar», con los campos de BlueStacks: iniciar/detener y suspender, sensibilidad X e Y,
   «Ajustes» (los Tweaks), aceleración del mouse, punto de mira (estilo o imagen propia, tamaño, opacidad
   y color, y se arrastra), disparar con clic izquierdo, mirar alrededor y mostrar las teclas en
-  pantalla. Varios esquemas de controles por juego, que se importan, exportan y cambian desde el menú
-  rápido. Lee los mapas de SwagPlayer y QtScrcpy. La inclinación no está: este Android no tiene
-  sensores.
+  pantalla. Su pestaña «Gamepad» hace que el joystick del mando gire la cámara (con su propia
+  sensibilidad y zona muerta) y que sus botones entren a la puntería, la suspendan, miren alrededor o
+  disparen; mientras tanto el mando no le llega a Android. Varios esquemas de controles por juego, que
+  se importan, exportan y cambian desde el menú rápido. Lee los mapas de SwagPlayer y QtScrcpy. La
+  inclinación no está: este Android no tiene sensores.
 - **Puntería como BlueStacks:** el mouse se lee directo (evdev) y la cámara usa la misma fórmula que
   BlueStacks 5, así que la sensibilidad se siente igual. También hace como allá la aceleración del
   mouse (la curva de Windows), mirar alrededor y cuándo el dedo vuelve a empezar al salirse de la
-  pantalla. `` ` `` suspende o activa la puntería.
+  pantalla. Android no predice los toques (con los del mouse, la mira temblaba al frenar). `` ` ``
+  suspende o activa la puntería.
 - **Sonido** de Android.
 - **Configuración con las secciones de BlueStacks 5**, solo con lo que de verdad funciona aquí:
   - *Rendimiento:* modos (perfil de energía, prioridad de Android y una velocidad mínima para la GPU
