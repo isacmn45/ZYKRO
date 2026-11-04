@@ -959,7 +959,7 @@ impl Zykro {
         // Un botón del mando, para los campos de la pestaña «Gamepad» (los de antes se descartan). El
         // mando no despierta a la ventana: mientras espera uno, se revisa cada 50 ms.
         if let Some(boton) = gamepad::tomar_boton().filter(|_| self.editor.esperando_mando()) {
-            self.editor.tecla(boton);
+            self.editor.tecla(&boton);
         }
         if self.editor.esperando_mando() {
             ctx.request_repaint_after(Duration::from_millis(50));
@@ -1217,6 +1217,14 @@ impl Zykro {
             } else {
                 let motor = self.motor();
                 if let Some(mapa) = motor.mapa.as_ref().filter(|m| m.overlay.enabled && !escribiendo) {
+                    // Con un mando conectado que el mapa usa, sus botones en vez de las teclas.
+                    let vista;
+                    let mapa = if motor.usa_mando() && !gamepad::CONECTADOS.lock().unwrap().is_empty() {
+                        vista = mapa.vista_mando();
+                        &vista
+                    } else {
+                        mapa
+                    };
                     editor::dibujar(&ui.painter_at(rect), rect, mapa, mapa.overlay.opacity, None, false);
                 }
                 if let Some(mira) = motor.mira() {

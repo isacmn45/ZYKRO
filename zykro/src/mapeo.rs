@@ -4,7 +4,7 @@
 //! script, deslizar en cuatro direcciones, zoom, D-pad y habilidades MOBA, rotar, desplazamiento de
 //! borde, desplazarse y rueda del mouse. Cada juego puede tener varios esquemas de controles.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -267,6 +267,9 @@ pub struct Clic {
     pub pos: Punto,
     #[serde(rename = "switchMap", default)]
     pub cambia_modo: bool,
+    /// El botón (o combinación) del mando de cada tecla, en el orden de `Nodo::teclas`.
+    #[serde(rename = "gamepadKeys", default, skip_serializing_if = "Vec::is_empty")]
+    pub mando: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -283,6 +286,9 @@ pub struct Multi {
     pub key: String,
     #[serde(rename = "clickNodes", default)]
     pub pasos: Vec<PasoMulti>,
+    /// El botón (o combinación) del mando de cada tecla, en el orden de `Nodo::teclas`.
+    #[serde(rename = "gamepadKeys", default, skip_serializing_if = "Vec::is_empty")]
+    pub mando: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -328,6 +334,13 @@ pub struct Dpad {
     /// Hasta este radio el dedo salta de golpe; desde ahí desliza.
     #[serde(rename = "deadZone", default)]
     pub zona_muerta: f32,
+    /// El botón (o combinación) del mando de cada tecla, en el orden de `Nodo::teclas`.
+    #[serde(rename = "gamepadKeys", default, skip_serializing_if = "Vec::is_empty")]
+    pub mando: Vec<String>,
+    /// El joystick del mando que lo mueve (`LeftStick` o `RightStick`), como en BlueStacks: cuanto más
+    /// lo inclinas, más lejos va el dedo.
+    #[serde(rename = "gamepadStick", default, skip_serializing_if = "String::is_empty")]
+    pub stick: String,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -356,6 +369,9 @@ pub struct Arrastre {
     pub fin: Punto,
     #[serde(rename = "dragSpeed", default = "uno")]
     pub velocidad: f32,
+    /// El botón (o combinación) del mando de cada tecla, en el orden de `Nodo::teclas`.
+    #[serde(rename = "gamepadKeys", default, skip_serializing_if = "Vec::is_empty")]
+    pub mando: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -387,6 +403,9 @@ pub struct Repetido {
     pub hasta_soltar: bool,
     #[serde(rename = "tapsPerSecond", default = "diez")]
     pub por_segundo: f32,
+    /// El botón (o combinación) del mando de cada tecla, en el orden de `Nodo::teclas`.
+    #[serde(rename = "gamepadKeys", default, skip_serializing_if = "Vec::is_empty")]
+    pub mando: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -414,6 +433,9 @@ pub struct MiradaLibre {
     /// Al llegar a la orilla, el dedo se levanta y vuelve al ojo tras esta espera.
     #[serde(rename = "edgeResetDelay", default = "trescientos")]
     pub espera_orilla_ms: u64,
+    /// El botón (o combinación) del mando de cada tecla, en el orden de `Nodo::teclas`.
+    #[serde(rename = "gamepadKeys", default, skip_serializing_if = "Vec::is_empty")]
+    pub mando: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -425,6 +447,9 @@ pub struct ScriptNodo {
     pub pos: Punto,
     #[serde(rename = "script", default)]
     pub texto: String,
+    /// El botón (o combinación) del mando de cada tecla, en el orden de `Nodo::teclas`.
+    #[serde(rename = "gamepadKeys", default, skip_serializing_if = "Vec::is_empty")]
+    pub mando: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -450,6 +475,9 @@ pub struct Deslizar {
     /// El dedo se queda al final mientras la tecla siga presionada.
     #[serde(rename = "swipeHold", default)]
     pub mantener: bool,
+    /// El botón (o combinación) del mando de cada tecla, en el orden de `Nodo::teclas`.
+    #[serde(rename = "gamepadKeys", default, skip_serializing_if = "Vec::is_empty")]
+    pub mando: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -483,6 +511,9 @@ pub struct Zoom {
     /// Solo sus teclas; si no, también Ctrl + = y Ctrl + -.
     #[serde(rename = "override", default)]
     pub exclusivo: bool,
+    /// El botón (o combinación) del mando de cada tecla, en el orden de `Nodo::teclas`.
+    #[serde(rename = "gamepadKeys", default, skip_serializing_if = "Vec::is_empty")]
+    pub mando: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -502,6 +533,9 @@ pub struct MobaDpad {
     /// Tecla para detener el movimiento (vacía = sin ella).
     #[serde(rename = "cancelKey", default, skip_serializing_if = "String::is_empty")]
     pub cancelar: String,
+    /// El botón (o combinación) del mando de cada tecla, en el orden de `Nodo::teclas`.
+    #[serde(rename = "gamepadKeys", default, skip_serializing_if = "Vec::is_empty")]
+    pub mando: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -525,6 +559,9 @@ pub struct MobaHabilidad {
     pub cancelar: String,
     #[serde(rename = "cancelPos", default, skip_serializing_if = "Option::is_none")]
     pub cancelar_pos: Option<Punto>,
+    /// El botón (o combinación) del mando de cada tecla, en el orden de `Nodo::teclas`.
+    #[serde(rename = "gamepadKeys", default, skip_serializing_if = "Vec::is_empty")]
+    pub mando: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -547,6 +584,9 @@ pub struct Rotar {
     pub velocidad: f32,
     #[serde(rename = "activationTime", default)]
     pub activacion_ms: u64,
+    /// El botón (o combinación) del mando de cada tecla, en el orden de `Nodo::teclas`.
+    #[serde(rename = "gamepadKeys", default, skip_serializing_if = "Vec::is_empty")]
+    pub mando: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -652,6 +692,134 @@ pub enum Nodo {
 }
 
 impl Nodo {
+    /// Las teclas del control, en orden (las mismas casillas que el editor).
+    pub fn teclas(&self) -> Vec<&String> {
+        match self {
+            Nodo::Clic(c, _) => vec![&c.key],
+            Nodo::Multi(m) => vec![&m.key],
+            Nodo::Dpad(d) => vec![&d.arriba, &d.abajo, &d.izquierda, &d.derecha, &d.tecla1, &d.tecla2],
+            Nodo::Arrastre(a) => vec![&a.key],
+            Nodo::Repetido(r) => vec![&r.key],
+            Nodo::MiradaLibre(m) => vec![&m.key, &m.arriba, &m.abajo, &m.izquierda, &m.derecha],
+            Nodo::Script(s) => vec![&s.key],
+            Nodo::Deslizar(d) => vec![&d.arriba, &d.abajo, &d.izquierda, &d.derecha],
+            Nodo::Zoom(z) => vec![&z.acercar, &z.alejar, &z.modificador],
+            Nodo::MobaDpad(m) => vec![&m.cancelar],
+            Nodo::MobaHabilidad(h) => vec![&h.key, &h.cancelar],
+            Nodo::Rotar(r) => vec![&r.horario, &r.antihorario],
+            Nodo::Borde(_) | Nodo::Desplazar(_) | Nodo::Rueda(_) | Nodo::Otro(_) => Vec::new(),
+        }
+    }
+
+    pub fn tecla_mut(&mut self, k: usize) -> Option<&mut String> {
+        Some(match (self, k) {
+            (Nodo::Clic(c, _), 0) => &mut c.key,
+            (Nodo::Multi(m), 0) => &mut m.key,
+            (Nodo::Arrastre(a), 0) => &mut a.key,
+            (Nodo::Repetido(r), 0) => &mut r.key,
+            (Nodo::Script(s), 0) => &mut s.key,
+            (Nodo::Dpad(d), k) => [&mut d.arriba, &mut d.abajo, &mut d.izquierda, &mut d.derecha, &mut d.tecla1, &mut d.tecla2].into_iter().nth(k)?,
+            (Nodo::MiradaLibre(m), k) => [&mut m.key, &mut m.arriba, &mut m.abajo, &mut m.izquierda, &mut m.derecha].into_iter().nth(k)?,
+            (Nodo::Deslizar(d), k) => [&mut d.arriba, &mut d.abajo, &mut d.izquierda, &mut d.derecha].into_iter().nth(k)?,
+            (Nodo::Zoom(z), k) => [&mut z.acercar, &mut z.alejar, &mut z.modificador].into_iter().nth(k)?,
+            (Nodo::MobaDpad(m), 0) => &mut m.cancelar,
+            (Nodo::MobaHabilidad(h), k) => [&mut h.key, &mut h.cancelar].into_iter().nth(k)?,
+            (Nodo::Rotar(r), k) => [&mut r.horario, &mut r.antihorario].into_iter().nth(k)?,
+            _ => return None,
+        })
+    }
+
+    /// Pone la tecla del teclado de la casilla `k` (vacía = quitarla). Si el control no tenía tecla y
+    /// en la casilla estaba su botón del mando, el botón pasa a `gamepadKeys`; al quitar la tecla,
+    /// vuelve a la casilla (ver `mando_de`).
+    pub fn poner_tecla(&mut self, k: usize, tecla: String) {
+        let boton = self.mando_de(k).to_string();
+        let Some(casilla) = self.tecla_mut(k) else { return };
+        match (tecla.is_empty(), es_mando(casilla)) {
+            (true, true) => {}
+            (true, false) => {
+                *casilla = boton;
+                self.poner_en_lista(k, String::new());
+            }
+            (false, true) => {
+                *casilla = tecla;
+                self.poner_en_lista(k, boton);
+            }
+            (false, false) => *casilla = tecla,
+        }
+    }
+
+    /// Pone el botón (o combinación) del mando de la casilla `k` (vacío = quitarlo).
+    pub fn poner_mando(&mut self, k: usize, boton: String) {
+        let Some(casilla) = self.tecla_mut(k) else { return };
+        if casilla.is_empty() || es_mando(casilla) {
+            *casilla = boton;
+            self.poner_en_lista(k, String::new());
+        } else {
+            self.poner_en_lista(k, boton);
+        }
+    }
+
+    fn poner_en_lista(&mut self, k: usize, boton: String) {
+        let Some(lista) = self.mando_mut() else { return };
+        if lista.len() <= k {
+            if boton.is_empty() {
+                return;
+            }
+            lista.resize(k + 1, String::new());
+        }
+        lista[k] = boton;
+        while lista.last().is_some_and(|b| b.is_empty()) {
+            lista.pop();
+        }
+    }
+
+    /// Los botones del mando de cada tecla (`gamepadKeys`), si el control tiene teclas.
+    pub fn mando(&self) -> Option<&Vec<String>> {
+        Some(match self {
+            Nodo::Clic(c, _) => &c.mando,
+            Nodo::Multi(m) => &m.mando,
+            Nodo::Dpad(d) => &d.mando,
+            Nodo::Arrastre(a) => &a.mando,
+            Nodo::Repetido(r) => &r.mando,
+            Nodo::MiradaLibre(m) => &m.mando,
+            Nodo::Script(s) => &s.mando,
+            Nodo::Deslizar(d) => &d.mando,
+            Nodo::Zoom(z) => &z.mando,
+            Nodo::MobaDpad(m) => &m.mando,
+            Nodo::MobaHabilidad(h) => &h.mando,
+            Nodo::Rotar(r) => &r.mando,
+            Nodo::Borde(_) | Nodo::Desplazar(_) | Nodo::Rueda(_) | Nodo::Otro(_) => return None,
+        })
+    }
+
+    pub fn mando_mut(&mut self) -> Option<&mut Vec<String>> {
+        Some(match self {
+            Nodo::Clic(c, _) => &mut c.mando,
+            Nodo::Multi(m) => &mut m.mando,
+            Nodo::Dpad(d) => &mut d.mando,
+            Nodo::Arrastre(a) => &mut a.mando,
+            Nodo::Repetido(r) => &mut r.mando,
+            Nodo::MiradaLibre(m) => &mut m.mando,
+            Nodo::Script(s) => &mut s.mando,
+            Nodo::Deslizar(d) => &mut d.mando,
+            Nodo::Zoom(z) => &mut z.mando,
+            Nodo::MobaDpad(m) => &mut m.mando,
+            Nodo::MobaHabilidad(h) => &mut h.mando,
+            Nodo::Rotar(r) => &mut r.mando,
+            Nodo::Borde(_) | Nodo::Desplazar(_) | Nodo::Rueda(_) | Nodo::Otro(_) => return None,
+        })
+    }
+
+    /// El botón del mando de la tecla `k`. Si el control no tiene tecla del teclado ahí, el botón va en
+    /// la tecla misma (así el motor lo encuentra igual que una tecla).
+    pub fn mando_de(&self, k: usize) -> &str {
+        match self.teclas().get(k) {
+            Some(tecla) if es_mando(tecla) => tecla,
+            _ => self.mando().and_then(|m| m.get(k)).map_or("", |s| s.as_str()),
+        }
+    }
+
     fn desde_json(v: Value) -> Nodo {
         let tipo = v["type"].as_str().unwrap_or("").to_string();
         let r = match tipo.as_str() {
@@ -774,6 +942,29 @@ impl Mapa {
         std::fs::write(esquemas.join(format!("{}.json", archivo_esquema(&self.esquema()))), datos)
     }
 
+    /// Una copia para mostrar en pantalla con los botones del mando en vez de las teclas (los controles
+    /// sin botón muestran su tecla).
+    pub fn vista_mando(&self) -> Mapa {
+        let mut vista = self.clone();
+        for n in &mut vista.nodos {
+            for k in 0..n.teclas().len() {
+                let boton = n.mando_de(k).to_string();
+                if let Some(casilla) = n.tecla_mut(k).filter(|_| !boton.is_empty()) {
+                    *casilla = boton;
+                }
+            }
+        }
+        if let Some(r) = &mut vista.raton {
+            if !r.mando.iniciar.is_empty() {
+                vista.cambio = r.mando.iniciar.clone();
+            }
+            if !r.mando.mirar.is_empty() {
+                r.mirada_tecla = Some(r.mando.mirar.clone());
+            }
+        }
+        vista
+    }
+
     /// El esquema de controles al que pertenece (se guarda dentro del archivo).
     pub fn esquema(&self) -> String {
         self.extra.get("zykroScheme").and_then(|v| v.as_str()).unwrap_or(PREDETERMINADO).to_string()
@@ -892,31 +1083,55 @@ pub fn nombre_boton(b: PointerButton) -> &'static str {
     }
 }
 
-/// Los botones del mando con sus nombres de BlueStacks (los del archivo) y como se muestran.
-pub const BOTONES_MANDO: [(&str, &str); 17] = [
+/// Los botones del mando con sus nombres de BlueStacks (los del archivo) y como se muestran. Además
+/// están la cruceta y las direcciones de los joysticks, que también cuentan como botones (ver
+/// `etiqueta_boton`).
+pub const BOTONES_MANDO: [(&str, &str); 12] = [
     ("GamepadA", "A"),
     ("GamepadB", "B"),
     ("GamepadX", "X"),
     ("GamepadY", "Y"),
     ("GamepadLeftShoulder", "LB"),
     ("GamepadRightShoulder", "RB"),
-    ("GamepadLeftTrigger", "LT"),
-    ("GamepadRightTrigger", "RT"),
+    ("GamepadLTrigger", "LT"),
+    ("GamepadRTrigger", "RT"),
     ("GamepadBack", "Back"),
     ("GamepadStart", "Start"),
-    ("GamepadGuide", "Guía"),
     ("GamepadLeftThumb", "L3"),
     ("GamepadRightThumb", "R3"),
-    ("GamepadDpadUp", "Cruceta arriba"),
-    ("GamepadDpadDown", "Cruceta abajo"),
-    ("GamepadDpadLeft", "Cruceta izq."),
-    ("GamepadDpadRight", "Cruceta der."),
 ];
+
+/// Un botón del mando como se muestra: «A», «LB», «Cruceta ↑», «Joystick izq. ←».
+fn etiqueta_boton(boton: &str) -> String {
+    use egui_phosphor::regular::{ARROW_DOWN, ARROW_LEFT, ARROW_RIGHT, ARROW_UP};
+    let flecha = |d: &str| match d {
+        "Up" => ARROW_UP,
+        "Down" => ARROW_DOWN,
+        "Left" => ARROW_LEFT,
+        _ => ARROW_RIGHT,
+    };
+    for (prefijo, nombre) in [("GamepadDpad", "Cruceta"), ("GamepadLStick", "Joystick izq."), ("GamepadRStick", "Joystick der.")] {
+        if let Some(direccion) = boton.strip_prefix(prefijo) {
+            return format!("{nombre} {}", flecha(direccion));
+        }
+    }
+    BOTONES_MANDO.iter().find(|(n, _)| *n == boton).map_or_else(|| boton.trim_start_matches("Gamepad").to_string(), |(_, e)| e.to_string())
+}
+
+/// Un botón o una combinación del mando (`GamepadA`, `GamepadLeftShoulder + GamepadX`).
+pub fn es_mando(tecla: &str) -> bool {
+    tecla.starts_with("Gamepad")
+}
+
+/// Los botones de una combinación del mando.
+fn partes(combinacion: &str) -> Vec<&str> {
+    combinacion.split('+').map(str::trim).filter(|b| !b.is_empty()).collect()
+}
 
 /// Texto corto para mostrar la tecla en pantalla.
 pub fn etiqueta(nombre: &str) -> String {
-    if let Some((_, texto)) = BOTONES_MANDO.iter().find(|(n, _)| *n == nombre) {
-        return texto.to_string();
+    if es_mando(nombre) {
+        return partes(nombre).into_iter().map(etiqueta_boton).collect::<Vec<_>>().join(" + ");
     }
     match nombre {
         "Key_Space" => "Espacio".into(),
@@ -1065,6 +1280,30 @@ fn acelerar(cuentas: f32) -> f32 {
     ((f * 96.0 / 150.0).ceil() as f32).copysign(cuentas)
 }
 
+/// Lo que hace una combinación del mando.
+#[derive(Clone, PartialEq)]
+enum Destino {
+    /// Presionar la tecla de un control (o el botón del mando que tiene en vez de tecla).
+    Tecla(String),
+    Iniciar,
+    Suspender,
+    Mirar,
+    Disparar,
+}
+
+/// Zona muerta del joystick de un D-pad (de 0 a 1).
+const ZONA_MUERTA_DPAD: f32 = 0.15;
+
+/// El joystick sin la zona muerta (radial): de 0 en su orilla a 1 en el tope.
+fn sin_zona_muerta(p: Vec2, zona: f32) -> Vec2 {
+    let zona = zona.clamp(0.0, 0.95);
+    let largo = p.length();
+    if largo <= zona {
+        return Vec2::ZERO;
+    }
+    p / largo * ((largo - zona) / (1.0 - zona)).min(1.0)
+}
+
 /// «Mirar alrededor» de la puntería, como BlueStacks: al presionar su tecla se levanta el dedo de la
 /// cámara y 100 ms después baja otro en el ojo, que el mouse arrastra; al soltarla se levanta y la
 /// cámara vuelve a bajar con el primer movimiento pasados 50 ms.
@@ -1168,6 +1407,11 @@ pub struct Motor {
     repetidos: HashMap<usize, Instant>,
     mirada: Option<Mirada>,
     mirar: Option<Mirar>,
+    /// Botones del mando presionados y las combinaciones que están haciendo algo.
+    mando: HashSet<String>,
+    combos: Vec<String>,
+    /// Dónde está el joystick de cada D-pad que se mueve con uno (ya sin la zona muerta).
+    palancas: HashMap<usize, Vec2>,
     scripts: Vec<Ejecucion>,
     /// Dedos que tiene puestos cada script con `touch` (y si tiene el del mouse).
     dedos_script: HashMap<usize, usize>,
@@ -1200,6 +1444,9 @@ impl Motor {
             repetidos: HashMap::new(),
             mirada: None,
             mirar: None,
+            mando: HashSet::new(),
+            combos: Vec::new(),
+            palancas: HashMap::new(),
             scripts: Vec::new(),
             dedos_script: HashMap::new(),
             deslizar: HashMap::new(),
@@ -1309,6 +1556,9 @@ impl Motor {
         self.repetidos.clear();
         self.mirada = None;
         self.mirar = None;
+        self.mando.clear();
+        self.combos.clear();
+        self.palancas.clear();
         self.scripts.clear();
         self.dedos_script.clear();
         self.deslizar.clear();
@@ -1610,57 +1860,170 @@ impl Motor {
         true
     }
 
-    /// La puntería tiene algo en la pestaña «Gamepad»: el mando lo usa el mapeo y no Android.
+    /// El mapa usa el mando (botones en sus controles, el joystick del D-pad o la pestaña «Gamepad» de
+    /// la puntería): entonces el mando es del mapeo y no le llega a Android.
     pub fn usa_mando(&self) -> bool {
-        self.mapa.as_ref().and_then(|m| m.raton.as_ref()).is_some_and(|r| !r.mando.vacio())
+        let Some(mapa) = self.mapa.as_ref() else { return false };
+        mapa.raton.as_ref().is_some_and(|r| !r.mando.vacio())
+            || mapa.nodos.iter().any(|n| {
+                matches!(n, Nodo::Dpad(d) if !d.stick.is_empty()) || (0..n.teclas().len()).any(|k| !n.mando_de(k).is_empty())
+            })
     }
 
-    /// El joystick de la puntería (`LeftStick`, `RightStick` o vacío) y su zona muerta (de 0 a 1).
-    pub fn joystick_mando(&self) -> Option<(String, f32)> {
-        let m = &self.mapa.as_ref()?.raton.as_ref()?.mando;
-        (!m.stick.is_empty()).then(|| (m.stick.clone(), (m.zona_muerta / 100.0).clamp(0.0, 0.95)))
+    /// Algún joystick mueve algo (la cámara o un D-pad): el hilo del mando avisa cada 10 ms.
+    pub fn usa_joystick(&self) -> bool {
+        let Some(mapa) = self.mapa.as_ref() else { return false };
+        mapa.raton.as_ref().is_some_and(|r| !r.mando.stick.is_empty()) || mapa.nodos.iter().any(|n| matches!(n, Nodo::Dpad(d) if !d.stick.is_empty()))
     }
 
-    /// Un botón del mando (`GamepadA`, `GamepadRightThumb`… como en BlueStacks), con lo que tenga en
-    /// la pestaña «Gamepad»: lo mismo que su tecla, o disparar.
-    pub fn boton_mando(&mut self, nombre: &str, presionado: bool) {
-        let Some((ctl, w, h)) = self.salida.clone() else { return };
-        let Some(m) = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).map(|r| r.mando.clone()) else { return };
-        if nombre == m.iniciar {
-            if presionado {
-                self.alternar_punteria(&ctl, w, h);
-            }
-        } else if nombre == m.suspender {
-            if !matches!(self.mirar, Some(Mirar::Bajando(_) | Mirar::Mirando)) {
-                self.pausa = presionado && self.apuntando;
-                if self.pausa {
-                    self.soltar_apunte(&ctl, w, h);
+    /// Las combinaciones del mando que tiene el mapa.
+    fn combinaciones(&self) -> Vec<String> {
+        let Some(mapa) = self.mapa.as_ref() else { return Vec::new() };
+        let mut lista: Vec<String> = Vec::new();
+        if let Some(m) = mapa.raton.as_ref().map(|r| &r.mando) {
+            lista.extend([&m.iniciar, &m.suspender, &m.mirar, &m.disparar].into_iter().cloned());
+        }
+        for n in &mapa.nodos {
+            lista.extend((0..n.teclas().len()).map(|k| n.mando_de(k).to_string()));
+        }
+        lista.retain(|c| !c.is_empty());
+        lista.sort();
+        lista.dedup();
+        lista
+    }
+
+    /// Lo que hace una combinación del mando: las teclas de los controles que la tienen (con
+    /// `tecla`, como si se presionaran) y lo de la pestaña «Gamepad» de la puntería.
+    fn destinos(&self, combinacion: &str) -> Vec<Destino> {
+        let Some(mapa) = self.mapa.as_ref() else { return Vec::new() };
+        let mut lista = Vec::new();
+        if let Some(m) = mapa.raton.as_ref().map(|r| &r.mando) {
+            for (boton, destino) in [(&m.iniciar, Destino::Iniciar), (&m.suspender, Destino::Suspender), (&m.mirar, Destino::Mirar), (&m.disparar, Destino::Disparar)] {
+                if boton == combinacion {
+                    lista.push(destino);
                 }
             }
-        } else if nombre == m.mirar {
-            let hay_ojo = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).is_some_and(|r| r.mirada_pos.is_some());
-            if hay_ojo && self.apuntando && !self.pausa {
+        }
+        for n in &mapa.nodos {
+            for (k, tecla) in n.teclas().into_iter().enumerate() {
+                let destino = Destino::Tecla(tecla.clone());
+                if !tecla.is_empty() && n.mando_de(k) == combinacion && !lista.contains(&destino) {
+                    lista.push(destino);
+                }
+            }
+        }
+        lista
+    }
+
+    fn hacer(&mut self, destino: Destino, presionado: bool, ctl: &Control, w: f32, h: f32) {
+        match destino {
+            Destino::Tecla(tecla) => {
+                self.tecla(&tecla, presionado, false, ctl, w, h);
+            }
+            Destino::Iniciar => {
                 if presionado {
-                    self.empezar_mirar(&ctl, w, h);
-                } else {
-                    self.terminar_mirar(&ctl, w, h);
+                    self.alternar_punteria(ctl, w, h);
                 }
             }
-        } else if nombre == m.disparar {
-            self.disparar(presionado, &ctl, w, h);
+            Destino::Suspender => {
+                if !matches!(self.mirar, Some(Mirar::Bajando(_) | Mirar::Mirando)) {
+                    self.pausa = presionado && self.apuntando;
+                    if self.pausa {
+                        self.soltar_apunte(ctl, w, h);
+                    }
+                }
+            }
+            Destino::Mirar => {
+                let hay_ojo = self.mapa.as_ref().and_then(|m| m.raton.as_ref()).is_some_and(|r| r.mirada_pos.is_some());
+                if hay_ojo && self.apuntando && !self.pausa {
+                    if presionado {
+                        self.empezar_mirar(ctl, w, h);
+                    } else {
+                        self.terminar_mirar(ctl, w, h);
+                    }
+                }
+            }
+            Destino::Disparar => {
+                self.disparar(presionado, ctl, w, h);
+            }
         }
     }
 
-    /// El joystick de la puntería, cada 10 ms (de −1 a 1, ya sin la zona muerta; Y hacia abajo).
-    /// Como BlueStacks: es como mover el mouse `palanca × 20` cuentas, con la sensibilidad del mando.
-    pub fn joystick(&mut self, palanca: Vec2) {
+    /// Un botón del mando (`GamepadA`, `GamepadRightThumb`… como en BlueStacks). Al presionarlo, hace
+    /// lo de las combinaciones que tienen ese botón y ya están completas, solo las más largas: con LB
+    /// presionado, X hace lo de «LB + X» y no lo de «X». Al soltarlo, se sueltan las que lo tenían.
+    pub fn boton_mando(&mut self, nombre: &str, presionado: bool) {
         let Some((ctl, w, h)) = self.salida.clone() else { return };
-        let Some(r) = self.mapa.as_ref().and_then(|m| m.raton.as_ref()) else { return };
-        let sens = r.mando.sens as f64;
-        let sens = (sens, sens * r.ratio_y as f64);
-        let delta = Vec2::new((palanca.x * 20.0).trunc(), (palanca.y * 20.0).trunc());
-        if delta != Vec2::ZERO && self.apuntando && !self.pausa {
-            self.mover_camara(delta, sens, &ctl, w, h);
+        if presionado {
+            if !self.mando.insert(nombre.to_string()) {
+                return;
+            }
+            let completas: Vec<String> = self
+                .combinaciones()
+                .into_iter()
+                .filter(|c| {
+                    let botones = partes(c);
+                    botones.contains(&nombre) && botones.iter().all(|b| self.mando.contains(*b))
+                })
+                .collect();
+            let largo = completas.iter().map(|c| partes(c).len()).max();
+            for c in completas.into_iter().filter(|c| Some(partes(c).len()) == largo) {
+                if !self.combos.contains(&c) {
+                    for destino in self.destinos(&c) {
+                        self.hacer(destino, true, &ctl, w, h);
+                    }
+                    self.combos.push(c);
+                }
+            }
+        } else {
+            self.mando.remove(nombre);
+            let (sueltas, siguen): (Vec<String>, Vec<String>) = std::mem::take(&mut self.combos).into_iter().partition(|c| partes(c).contains(&nombre));
+            self.combos = siguen;
+            for c in sueltas {
+                for destino in self.destinos(&c) {
+                    self.hacer(destino, false, &ctl, w, h);
+                }
+            }
+        }
+    }
+
+    /// Los dos joysticks del mando, cada 10 ms (de −1 a 1, Y hacia abajo, sin zona muerta). El de la
+    /// pestaña «Gamepad» de la puntería gira la cámara como BlueStacks: como mover el mouse
+    /// `palanca × 20` cuentas, con la sensibilidad del mando. El de un D-pad pone su dedo tan lejos
+    /// como lo inclines.
+    pub fn joysticks(&mut self, izquierdo: Vec2, derecho: Vec2) {
+        let Some((ctl, w, h)) = self.salida.clone() else { return };
+        let Some(mapa) = self.mapa.as_ref() else { return };
+        // Solo lo que usa joystick (se llama cada 10 ms).
+        let camara = mapa.raton.as_ref().filter(|r| !r.mando.stick.is_empty()).map(|r| (r.mando.clone(), r.ratio_y as f64));
+        let dpads: Vec<(usize, Dpad)> = mapa
+            .nodos
+            .iter()
+            .enumerate()
+            .filter_map(|(i, n)| match n {
+                Nodo::Dpad(d) if !d.stick.is_empty() => Some((i, d.clone())),
+                _ => None,
+            })
+            .collect();
+        let palanca = |cual: &str| match cual {
+            "LeftStick" => izquierdo,
+            "RightStick" => derecho,
+            _ => Vec2::ZERO,
+        };
+        if let Some((m, ratio_y)) = camara {
+            let p = sin_zona_muerta(palanca(&m.stick), m.zona_muerta / 100.0);
+            let delta = Vec2::new((p.x * 20.0).trunc(), (p.y * 20.0).trunc());
+            if delta != Vec2::ZERO && self.apuntando && !self.pausa {
+                let sens = m.sens as f64;
+                self.mover_camara(delta, (sens, sens * ratio_y), &ctl, w, h);
+            }
+        }
+        for (i, d) in dpads {
+            let p = sin_zona_muerta(palanca(&d.stick), ZONA_MUERTA_DPAD);
+            if self.palancas.get(&i).copied().unwrap_or(Vec2::ZERO) != p {
+                self.palancas.insert(i, p);
+                self.actualizar_dpad(i, &d, &ctl, w, h);
+            }
         }
     }
 
@@ -2199,6 +2562,11 @@ impl Motor {
         let p = |k: &str| !k.is_empty() && self.presionadas.contains_key(k);
         let dx = p(&d.derecha) as i32 as f32 - p(&d.izquierda) as i32 as f32;
         let dy = p(&d.abajo) as i32 as f32 - p(&d.arriba) as i32 as f32;
+        // Sin teclas, manda su joystick (si tiene): tan lejos como esté inclinado.
+        let (dx, dy) = match self.palancas.get(&i) {
+            Some(j) if dx == 0.0 && dy == 0.0 => (j.x, j.y),
+            _ => (dx, dy),
+        };
         let centro = (d.centro.x * w, d.centro.y * h);
         if dx == 0.0 && dy == 0.0 {
             if self.dpads.remove(&i).is_some() {
@@ -2650,26 +3018,105 @@ mod pruebas {
         r.mando = MandoApuntar {
             stick: "RightStick".into(),
             iniciar: "GamepadRightThumb".into(),
-            disparar: "GamepadRightTrigger".into(),
+            disparar: "GamepadRTrigger".into(),
             ..MandoApuntar::default()
         };
         let eventos = toques(Mapa { raton: Some(r), ..Mapa::default() }, |motor, ctl| {
             motor.fijar_salida(Some(ctl.clone()), W, H);
             assert!(motor.usa_mando());
-            motor.joystick(Vec2::new(0.5, 0.0));
+            motor.joysticks(Vec2::ZERO, Vec2::new(1.0, 0.0));
             assert!(!motor.apuntando, "sin entrar a la puntería, el joystick no hace nada");
             motor.boton_mando("GamepadRightThumb", true);
             motor.boton_mando("GamepadRightThumb", false);
             assert!(motor.apuntando);
-            motor.joystick(Vec2::new(0.5, 0.0));
+            // Dentro de la zona muerta (15 %) no se mueve.
+            motor.joysticks(Vec2::ZERO, Vec2::new(0.1, 0.0));
+            motor.joysticks(Vec2::ZERO, Vec2::new(1.0, 0.0));
             motor.mover(Vec2::new(10.0, 0.0), ctl, W, H);
-            motor.boton_mando("GamepadRightTrigger", true);
-            motor.boton_mando("GamepadRightTrigger", false);
+            motor.boton_mando("GamepadRTrigger", true);
+            motor.boton_mando("GamepadRTrigger", false);
             // Si el motor se queda con su copia del canal, la prueba no termina de leerlo.
             motor.fijar_salida(None, W, H);
         });
-        // 10 cuentas × 1 (mando) = 0.5625 % del ancho → 967; luego 10 × 2 (mouse) → 30 en total → 981.
-        assert_eq!(eventos, vec![(BAJAR, 960, 360), (MOVER, 967, 360), (MOVER, 981, 360), (BAJAR, 1120, 540), (SOLTAR, 1120, 540)]);
+        // 20 cuentas × 1 (mando) = 1.125 % del ancho → 974; luego 10 × 2 (mouse) → 40 en total → 988.
+        assert_eq!(eventos, vec![(BAJAR, 960, 360), (MOVER, 974, 360), (MOVER, 988, 360), (BAJAR, 1120, 540), (SOLTAR, 1120, 540)]);
+    }
+
+    fn toque_con_mando(tecla: &str, boton: &str, x: f32) -> Nodo {
+        let mut c: Clic = serde_json::from_value(serde_json::json!({ "key": tecla, "pos": { "x": x, "y": 0.5 } })).unwrap();
+        if !boton.is_empty() {
+            c.mando = vec![boton.into()];
+        }
+        Nodo::Clic(c, false)
+    }
+
+    /// Los botones del mando presionan la tecla de su control; con LB presionado, B hace lo de
+    /// «LB + B» y no lo de «B»; un control sin tecla del teclado responde a su botón.
+    #[test]
+    fn botones_y_combinaciones_del_mando() {
+        let mapa = Mapa {
+            nodos: vec![
+                toque_con_mando("C", "GamepadB", 0.25),
+                toque_con_mando("Z", "GamepadLeftShoulder + GamepadB", 0.5),
+                toque_con_mando("GamepadX", "", 0.75),
+            ],
+            ..Mapa::default()
+        };
+        let eventos = toques(mapa, |motor, ctl| {
+            motor.fijar_salida(Some(ctl.clone()), W, H);
+            assert!(motor.usa_mando());
+            motor.boton_mando("GamepadB", true);
+            motor.boton_mando("GamepadB", false);
+            motor.boton_mando("GamepadLeftShoulder", true);
+            motor.boton_mando("GamepadB", true);
+            motor.boton_mando("GamepadB", false);
+            motor.boton_mando("GamepadLeftShoulder", false);
+            motor.boton_mando("GamepadX", true);
+            motor.boton_mando("GamepadX", false);
+            motor.fijar_salida(None, W, H);
+        });
+        assert_eq!(
+            eventos,
+            vec![(BAJAR, 320, 360), (SOLTAR, 320, 360), (BAJAR, 640, 360), (SOLTAR, 640, 360), (BAJAR, 960, 360), (SOLTAR, 960, 360)]
+        );
+    }
+
+    /// El D-pad con joystick: el dedo va tan lejos como esté inclinado y se levanta al soltarlo.
+    #[test]
+    fn dpad_con_joystick() {
+        let mut d: Dpad = serde_json::from_value(serde_json::json!({
+            "centerPos": { "x": 0.25, "y": 0.75 }, "upKey": "W", "downKey": "S", "leftKey": "A", "rightKey": "D",
+            "upOffset": 0.1, "downOffset": 0.1, "leftOffset": 0.1, "rightOffset": 0.1
+        }))
+        .unwrap();
+        d.stick = "LeftStick".into();
+        let eventos = toques(con(Nodo::Dpad(d)), |motor, ctl| {
+            motor.fijar_salida(Some(ctl.clone()), W, H);
+            assert!(motor.usa_mando() && motor.usa_joystick());
+            motor.joysticks(Vec2::new(1.0, 0.0), Vec2::ZERO);
+            motor.joysticks(Vec2::new(0.575, 0.0), Vec2::ZERO);
+            motor.joysticks(Vec2::new(0.05, 0.0), Vec2::ZERO);
+            motor.fijar_salida(None, W, H);
+        });
+        // Centro (320, 540); a tope, el radio (0.1 del ancho = 128 px); a medio camino de la zona muerta
+        // al tope, la mitad.
+        assert_eq!(eventos, vec![(BAJAR, 320, 540), (MOVER, 448, 540), (MOVER, 384, 540), (SOLTAR, 384, 540)]);
+    }
+
+    /// Cómo se guardan la tecla y el botón de una casilla: sin tecla del teclado, el botón va en la
+    /// casilla; al ponerle tecla, el botón pasa a `gamepadKeys`, y al quitársela vuelve.
+    #[test]
+    fn tecla_y_boton_de_una_casilla() {
+        let mut n = toque_con_mando("", "", 0.5);
+        n.poner_mando(0, "GamepadA".into());
+        assert_eq!((n.teclas()[0].as_str(), n.mando_de(0)), ("GamepadA", "GamepadA"));
+        n.poner_tecla(0, "Key_Space".into());
+        assert_eq!((n.teclas()[0].as_str(), n.mando_de(0), n.mando().unwrap().clone()), ("Key_Space", "GamepadA", vec!["GamepadA".to_string()]));
+        n.poner_tecla(0, String::new());
+        assert_eq!((n.teclas()[0].as_str(), n.mando().unwrap().len()), ("GamepadA", 0));
+        n.poner_mando(0, String::new());
+        assert_eq!((n.teclas()[0].as_str(), n.mando_de(0)), ("", ""));
+        assert_eq!(etiqueta("GamepadLeftShoulder + GamepadX"), "LB + X");
     }
 
     /// «Mirar alrededor» como BlueStacks: se levanta la cámara, el ojo baja 100 ms después y el mouse
@@ -2758,7 +3205,7 @@ mod pruebas {
 
     #[test]
     fn toques_repetidos() {
-        let n = Repetido { key: "F".into(), pos: Punto::nuevo(0.5, 0.5), veces: 3, hasta_soltar: false, por_segundo: 20.0, extra: Map::new() };
+        let n = Repetido { key: "F".into(), pos: Punto::nuevo(0.5, 0.5), veces: 3, hasta_soltar: false, por_segundo: 20.0, mando: Vec::new(), extra: Map::new() };
         let t = toques(con(Nodo::Repetido(n)), |m, c| {
             m.tecla("F", true, false, c, W, H);
             m.tecla("F", false, false, c, W, H);
@@ -2771,7 +3218,7 @@ mod pruebas {
 
     #[test]
     fn script_toca_espera_y_desliza() {
-        let n = ScriptNodo { key: "G".into(), pos: Punto::nuevo(0.5, 0.5), texto: "tap 50 50 20\nloop 2\ntap 10 10\nloopEnd\nswipe 10 10 20 20 60".into(), extra: Map::new() };
+        let n = ScriptNodo { key: "G".into(), pos: Punto::nuevo(0.5, 0.5), texto: "tap 50 50 20\nloop 2\ntap 10 10\nloopEnd\nswipe 10 10 20 20 60".into(), mando: Vec::new(), extra: Map::new() };
         let t = toques(con(Nodo::Script(n)), |m, c| {
             m.tecla("G", true, false, c, W, H);
             esperar(m, c, 400);
@@ -2813,7 +3260,7 @@ mod pruebas {
             activacion_ms: 0,
             velocidad_inicial: 0.0,
             zona_muerta: 0.0,
-            extra: Map::new(),
+            mando: Vec::new(), stick: String::new(), extra: Map::new(),
         };
         let t = toques(con(Nodo::Dpad(d)), |m, c| {
             m.tecla("W", true, false, c, W, H);
@@ -2837,7 +3284,7 @@ mod pruebas {
             modo: 0,
             espera_ms: 30,
             exclusivo: false,
-            extra: Map::new(),
+            mando: Vec::new(), extra: Map::new(),
         };
         let t = toques(con(Nodo::Zoom(z)), |m, c| {
             assert!(m.rueda(1.0, c, W, H));
@@ -2851,7 +3298,7 @@ mod pruebas {
 
     #[test]
     fn dpad_moba_va_hacia_el_cursor() {
-        let n = MobaDpad { pos: Punto::nuevo(0.15, 0.75), radio: 0.1, heroe: Punto::nuevo(0.5, 0.5), velocidad_heroe: 2.0, cancelar: String::new(), extra: Map::new() };
+        let n = MobaDpad { pos: Punto::nuevo(0.15, 0.75), radio: 0.1, heroe: Punto::nuevo(0.5, 0.5), velocidad_heroe: 2.0, cancelar: String::new(), mando: Vec::new(), extra: Map::new() };
         let t = toques(con(Nodo::MobaDpad(n)), |m, c| {
             m.puntero(Some((1000.0, 360.0)), c, W, H);
             m.boton(PointerButton::Secondary, true, c, W, H);
@@ -2873,7 +3320,7 @@ mod pruebas {
             detener_dpad: false,
             cancelar: String::new(),
             cancelar_pos: None,
-            extra: Map::new(),
+            mando: Vec::new(), extra: Map::new(),
         };
         let t = toques(con(Nodo::MobaHabilidad(hb)), |m, c| {
             // Cursor arriba del centro (sin D-pad MOBA, el personaje es el centro), a más del alcance.
@@ -2886,7 +3333,7 @@ mod pruebas {
 
     #[test]
     fn rotar_gira_alrededor() {
-        let r = Rotar { pos: Punto::nuevo(0.5, 0.5), horario: "E".into(), antihorario: "Q".into(), radio: 0.1, angulo: 0.0, velocidad: 900.0, activacion_ms: 0, extra: Map::new() };
+        let r = Rotar { pos: Punto::nuevo(0.5, 0.5), horario: "E".into(), antihorario: "Q".into(), radio: 0.1, angulo: 0.0, velocidad: 900.0, activacion_ms: 0, mando: Vec::new(), extra: Map::new() };
         let t = toques(con(Nodo::Rotar(r)), |m, c| {
             m.tecla("E", true, false, c, W, H);
             esperar(m, c, 100);

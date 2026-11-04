@@ -5,9 +5,9 @@
 //! que el del mando virtual se crea a mano dentro de Android, como el del teclado (`teclado-fisico.c`).
 //! La vibración que pide Android (uinput la recibe como subidas de efectos) se pasa al mando real.
 //!
-//! Si la puntería del juego tiene algo en su pestaña «Gamepad» (como en BlueStacks), el mando lo usa
-//! el mapeo: el joystick mueve la cámara y sus botones hacen lo de las teclas. Mientras tanto Android
-//! ve el mando quieto.
+//! Si el mapa del juego usa el mando (botones en sus controles, el joystick del D-pad o la pestaña
+//! «Gamepad» de la puntería, como en BlueStacks), el mando es del mapeo: sus botones hacen lo de las
+//! teclas y los joysticks mueven al personaje y la cámara. Mientras tanto Android ve el mando quieto.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
@@ -36,12 +36,12 @@ pub static CONECTADOS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static EN_USO: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 /// Así se marcan los mandos de ZYKRO, para no repetirlos a ellos mismos.
 const FISICO: &str = "zykro-mando";
-/// El mapeo del juego está activo (lo prende la ventana): si su puntería usa el mando, el mando es suyo.
+/// El mapeo del juego está activo (lo prende la ventana): si su mapa usa el mando, el mando es suyo.
 pub static MAPEO: AtomicBool = AtomicBool::new(false);
-/// El motor de controles, para que el mando mueva la puntería.
+/// El motor de controles, para que el mando haga lo del mapa.
 pub static MOTOR: OnceLock<Arc<Mutex<Motor>>> = OnceLock::new();
-/// El último botón que se presionó en un mando (para asignarlo en el editor).
-static ULTIMO: Mutex<Option<&'static str>> = Mutex::new(None);
+/// La última combinación del mando que se presionó y soltó (para asignarla en el editor).
+static ULTIMO: Mutex<Option<String>> = Mutex::new(None);
 
 const EV_SYN: u16 = 0x00;
 const EV_KEY: u16 = 0x01;
@@ -293,8 +293,9 @@ fn repetir(ruta: &PathBuf) -> std::io::Result<()> {
     resultado
 }
 
-/// El botón del mando que se presionó desde la última vez (y lo olvida).
-pub fn tomar_boton() -> Option<&'static str> {
+/// La combinación del mando que se presionó y soltó desde la última vez (y la olvida): «GamepadA», o
+/// «GamepadLeftShoulder + GamepadX» si se presionaron juntos (en el orden en que se presionaron).
+pub fn tomar_boton() -> Option<String> {
     ULTIMO.lock().unwrap().take()
 }
 
@@ -308,11 +309,10 @@ fn nombre_boton(codigo: u16) -> Option<&'static str> {
         0x134 => "GamepadX",
         0x136 => "GamepadLeftShoulder",
         0x137 => "GamepadRightShoulder",
-        0x138 => "GamepadLeftTrigger",
-        0x139 => "GamepadRightTrigger",
+        0x138 => "GamepadLTrigger",
+        0x139 => "GamepadRTrigger",
         0x13a => "GamepadBack",
         0x13b => "GamepadStart",
-        0x13c => "GamepadGuide",
         0x13d => "GamepadLeftThumb",
         0x13e => "GamepadRightThumb",
         0x220 => "GamepadDpadUp",
@@ -386,7 +386,7 @@ impl Estado {
         let mut botones: HashSet<&'static str> = self.teclas.iter().filter_map(|&c| nombre_boton(c)).collect();
         // Los gatillos analógicos cuentan pasado un tercio del recorrido.
         if let Some((lt, rt)) = d.gatillos {
-            for (eje, nombre) in [(lt, "GamepadLeftTrigger"), (rt, "GamepadRightTrigger")] {
+            for (eje, nombre) in [(lt, "GamepadLTrigger"), (rt, "GamepadRTrigger")] {
                 if self.ejes.get(&eje).is_some_and(|&v| d.normal(eje, v) > -1.0 / 3.0) {
                     botones.insert(nombre);
                 }
@@ -400,19 +400,28 @@ impl Estado {
                 _ => false,
             };
         }
+        // Las direcciones de los joysticks, pasada la mitad (como `GamepadLStickUp` de BlueStacks).
+        for (p, prefijo) in [(self.palanca(d, true), "L"), (self.palanca(d, false), "R")] {
+            let direcciones: [(bool, &'static str, &'static str); 4] = [
+                (p.y < -0.5, "GamepadLStickUp", "GamepadRStickUp"),
+                (p.y > 0.5, "GamepadLStickDown", "GamepadRStickDown"),
+                (p.x < -0.5, "GamepadLStickLeft", "GamepadRStickLeft"),
+                (p.x > 0.5, "GamepadLStickRight", "GamepadRStickRight"),
+            ];
+            for (inclinado, izquierdo, derecho) in direcciones {
+                if inclinado {
+                    botones.insert(if prefijo == "L" { izquierdo } else { derecho });
+                }
+            }
+        }
         botones
     }
 
-    /// El joystick `cual` (`LeftStick` o `RightStick`) de −1 a 1, sin la zona muerta (radial).
-    fn palanca(&self, d: &Disposicion, cual: &str, zona: f32) -> Vec2 {
-        let Some((ex, ey)) = (if cual == "LeftStick" { Some(d.izquierdo) } else { d.derecho }) else { return Vec2::ZERO };
+    /// El joystick izquierdo o el derecho, de −1 a 1 (Y hacia abajo).
+    fn palanca(&self, d: &Disposicion, izquierdo: bool) -> Vec2 {
+        let Some((ex, ey)) = (if izquierdo { Some(d.izquierdo) } else { d.derecho }) else { return Vec2::ZERO };
         let eje = |e: u16| self.ejes.get(&e).map_or(0.0, |&v| d.normal(e, v));
-        let p = Vec2::new(eje(ex), eje(ey));
-        let largo = p.length();
-        if largo <= zona {
-            return Vec2::ZERO;
-        }
-        p / largo * ((largo - zona) / (1.0 - zona)).min(1.0)
+        Vec2::new(eje(ex), eje(ey))
     }
 }
 
@@ -435,6 +444,8 @@ fn bucle(real: &mut File, virtual_: &mut File, disposicion: &Disposicion, mut es
     let mut efectos: HashMap<i16, i16> = HashMap::new();
     let mut buf = [Evento::default(); 64];
     let mut presionados = estado.botones(disposicion);
+    // Los botones presionados juntos (para el editor), en orden, hasta que se suelten todos.
+    let mut grupo: Vec<&'static str> = Vec::new();
     let mut del_mapeo = false;
     let mut proximo = Instant::now();
     loop {
@@ -442,20 +453,17 @@ fn bucle(real: &mut File, virtual_: &mut File, disposicion: &Disposicion, mut es
             return Ok(());
         }
         let motor = MOTOR.get();
-        let (usar, joystick) = motor.map_or((false, None), |m| {
+        let (usar, joystick) = motor.map_or((false, false), |m| {
             let m = m.lock().unwrap();
-            (MAPEO.load(Ordering::Relaxed) && m.usa_mando(), m.joystick_mando())
+            (MAPEO.load(Ordering::Relaxed) && m.usa_mando(), m.usa_joystick())
         });
         if usar != del_mapeo {
             // Que Android no se quede con botones presionados o el joystick movido (ni al revés).
             escribir_estado(virtual_, &estado, disposicion, usar);
             del_mapeo = usar;
         }
-        // Con el joystick de la puntería, se despierta cada 10 ms para mover la cámara.
-        let espera = match (&joystick, del_mapeo) {
-            (Some(_), true) => proximo.saturating_duration_since(Instant::now()).as_millis() as i32,
-            _ => 500,
-        };
+        // Si un joystick mueve algo, se despierta cada 10 ms.
+        let espera = if joystick && del_mapeo { proximo.saturating_duration_since(Instant::now()).as_millis() as i32 } else { 500 };
         let mut espera_fd = [libc::pollfd { fd, events: libc::POLLIN, revents: 0 }, libc::pollfd { fd: v, events: libc::POLLIN, revents: 0 }];
         unsafe { libc::poll(espera_fd.as_mut_ptr(), 2, espera) };
         if espera_fd[0].revents & (libc::POLLERR | libc::POLLHUP) != 0 {
@@ -481,7 +489,13 @@ fn bucle(real: &mut File, virtual_: &mut File, disposicion: &Disposicion, mut es
             if evento.tipo == EV_SYN {
                 let ahora = estado.botones(disposicion);
                 for &nombre in ahora.difference(&presionados) {
-                    *ULTIMO.lock().unwrap() = Some(nombre);
+                    if !grupo.contains(&nombre) {
+                        grupo.push(nombre);
+                    }
+                }
+                if ahora.is_empty() && !grupo.is_empty() {
+                    *ULTIMO.lock().unwrap() = Some(grupo.join(" + "));
+                    grupo.clear();
                 }
                 if let Some(m) = motor.filter(|_| del_mapeo) {
                     let mut m = m.lock().unwrap();
@@ -495,12 +509,9 @@ fn bucle(real: &mut File, virtual_: &mut File, disposicion: &Disposicion, mut es
                 presionados = ahora;
             }
         }
-        if let (Some((cual, zona)), Some(m), true) = (&joystick, motor, del_mapeo) {
+        if let (Some(m), true, true) = (motor, joystick, del_mapeo) {
             if Instant::now() >= proximo {
-                let palanca = estado.palanca(disposicion, cual, *zona);
-                if palanca != Vec2::ZERO {
-                    m.lock().unwrap().joystick(palanca);
-                }
+                m.lock().unwrap().joysticks(estado.palanca(disposicion, true), estado.palanca(disposicion, false));
                 proximo = Instant::now() + Duration::from_millis(10);
             }
         }
@@ -648,10 +659,12 @@ mod pruebas {
         e.ejes.insert(ABS_HAT0Y as u16, -1);
         let mut botones: Vec<_> = e.botones(&d).into_iter().collect();
         botones.sort();
-        assert_eq!(botones, vec!["GamepadDpadUp", "GamepadRightThumb", "GamepadRightTrigger"]);
-        // Un gatillo apenas presionado no cuenta.
+        assert_eq!(botones, vec!["GamepadDpadUp", "GamepadRTrigger", "GamepadRightThumb"]);
+        // Un gatillo apenas presionado no cuenta; el joystick inclinado a la izquierda, sí.
         e.ejes.insert(ABS_RZ as u16, 200);
-        assert!(!e.botones(&d).contains("GamepadRightTrigger"));
+        e.ejes.insert(ABS_X as u16, -30000);
+        let botones = e.botones(&d);
+        assert!(!botones.contains("GamepadRTrigger") && botones.contains("GamepadLStickLeft"), "{botones:?}");
         // Cómo lo ve Android mientras es del mapeo: suelto.
         assert_eq!((d.reposo(ABS_RX as u16), d.reposo(ABS_RZ as u16), d.reposo(ABS_HAT0X as u16)), (0, 0, 0));
     }
@@ -735,17 +748,12 @@ mod pruebas {
     }
 
     #[test]
-    fn joystick_con_zona_muerta() {
+    fn joysticks_de_menos_uno_a_uno() {
         let (d, mut e) = xbox();
-        e.ejes.insert(ABS_RX as u16, 3000);
-        assert_eq!(e.palanca(&d, "RightStick", 0.15), Vec2::ZERO, "dentro de la zona muerta");
         e.ejes.insert(ABS_RX as u16, 32767);
-        let p = e.palanca(&d, "RightStick", 0.15);
-        assert!((p.x - 1.0).abs() < 1e-4 && p.y.abs() < 1e-3, "{p:?}");
-        // A medio camino de la orilla de la zona muerta al tope, la mitad.
-        e.ejes.insert(ABS_RX as u16, (32767.0 * 0.575) as i32);
-        let p = e.palanca(&d, "RightStick", 0.15);
-        assert!((p.x - 0.5).abs() < 0.01, "{p:?}");
-        assert_eq!(e.palanca(&d, "LeftStick", 0.15), Vec2::ZERO);
+        e.ejes.insert(ABS_Y as u16, -32768);
+        let (izquierdo, derecho) = (e.palanca(&d, true), e.palanca(&d, false));
+        assert!((derecho.x - 1.0).abs() < 1e-4 && derecho.y.abs() < 1e-3, "{derecho:?}");
+        assert!((izquierdo.y + 1.0).abs() < 1e-4 && izquierdo.x.abs() < 1e-3, "{izquierdo:?}");
     }
 }

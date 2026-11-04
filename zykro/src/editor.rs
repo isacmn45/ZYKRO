@@ -62,6 +62,8 @@ enum Objetivo {
     Ojo,
     /// Un botón de la pestaña «Gamepad» de la puntería.
     Mando(CampoMando),
+    /// El botón del mando de la tecla `k` de un control.
+    MandoNodo(usize, usize),
 }
 
 /// Los botones de la pestaña «Gamepad» de la puntería.
@@ -151,24 +153,6 @@ fn teclas(n: &Nodo) -> Vec<(&'static str, String)> {
         Nodo::Rotar(r) => vec![("Horario", v(&r.horario)), ("Antihorario", v(&r.antihorario))],
         Nodo::Borde(_) | Nodo::Desplazar(_) | Nodo::Rueda(_) | Nodo::Otro(_) => Vec::new(),
     }
-}
-
-fn tecla_mut(n: &mut Nodo, k: usize) -> Option<&mut String> {
-    Some(match (n, k) {
-        (Nodo::Clic(c, _), 0) => &mut c.key,
-        (Nodo::Multi(m), 0) => &mut m.key,
-        (Nodo::Arrastre(a), 0) => &mut a.key,
-        (Nodo::Repetido(r), 0) => &mut r.key,
-        (Nodo::Script(s), 0) => &mut s.key,
-        (Nodo::Dpad(d), k) => [&mut d.arriba, &mut d.abajo, &mut d.izquierda, &mut d.derecha, &mut d.tecla1, &mut d.tecla2].into_iter().nth(k)?,
-        (Nodo::MiradaLibre(m), k) => [&mut m.key, &mut m.arriba, &mut m.abajo, &mut m.izquierda, &mut m.derecha].into_iter().nth(k)?,
-        (Nodo::Deslizar(d), k) => [&mut d.arriba, &mut d.abajo, &mut d.izquierda, &mut d.derecha].into_iter().nth(k)?,
-        (Nodo::Zoom(z), k) => [&mut z.acercar, &mut z.alejar, &mut z.modificador].into_iter().nth(k)?,
-        (Nodo::MobaDpad(m), 0) => &mut m.cancelar,
-        (Nodo::MobaHabilidad(h), k) => [&mut h.key, &mut h.cancelar].into_iter().nth(k)?,
-        (Nodo::Rotar(r), k) => [&mut r.horario, &mut r.antihorario].into_iter().nth(k)?,
-        _ => return None,
-    })
 }
 
 /// La posición principal del control.
@@ -628,9 +612,9 @@ impl Editor {
         self.esperando.is_some()
     }
 
-    /// Espera un botón del mando (los de la pestaña «Gamepad»).
+    /// Espera un botón del mando.
     pub fn esperando_mando(&self) -> bool {
-        matches!(self.esperando, Some(Objetivo::Mando(_)))
+        matches!(self.esperando, Some(Objetivo::Mando(_) | Objetivo::MandoNodo(..)))
     }
 
     /// Tecla presionada mientras el editor está abierto.
@@ -647,7 +631,7 @@ impl Editor {
         // Los campos del mando solo aceptan botones del mando (y Retroceso, que lo quita); los demás,
         // solo teclas y el mouse.
         let del_mando = nombre.starts_with("Gamepad");
-        if matches!(obj, Objetivo::Mando(_)) != del_mando && nombre != "Key_Backspace" {
+        if matches!(obj, Objetivo::Mando(_) | Objetivo::MandoNodo(..)) != del_mando && nombre != "Key_Backspace" {
             self.esperando = Some(obj);
             return;
         }
@@ -655,8 +639,13 @@ impl Editor {
         let n = if nombre == "Key_Backspace" { String::new() } else { nombre.to_string() };
         match obj {
             Objetivo::Tecla(i, k) => {
-                if let Some(t) = self.mapa.nodos.get_mut(i).and_then(|nodo| tecla_mut(nodo, k)) {
-                    *t = n;
+                if let Some(nodo) = self.mapa.nodos.get_mut(i) {
+                    nodo.poner_tecla(k, n);
+                }
+            }
+            Objetivo::MandoNodo(i, k) => {
+                if let Some(nodo) = self.mapa.nodos.get_mut(i) {
+                    nodo.poner_mando(k, n);
                 }
             }
             Objetivo::Cambio => self.mapa.cambio = n,
@@ -721,8 +710,8 @@ impl Editor {
         let extra = Map::new;
         let mas = |dx: f32, dy: f32| Punto::nuevo(p.x + dx, p.y + dy);
         let nodo = match tipo {
-            Tipo::Toque => Nodo::Clic(Clic { key: String::new(), pos: p, cambia_modo: false, extra: extra() }, false),
-            Tipo::Repetido => Nodo::Repetido(Repetido { key: String::new(), pos: p, veces: 5, hasta_soltar: false, por_segundo: 10.0, extra: extra() }),
+            Tipo::Toque => Nodo::Clic(Clic { key: String::new(), pos: p, cambia_modo: false, mando: Vec::new(), extra: extra() }, false),
+            Tipo::Repetido => Nodo::Repetido(Repetido { key: String::new(), pos: p, veces: 5, hasta_soltar: false, por_segundo: 10.0, mando: Vec::new(), extra: extra() }),
             Tipo::Dpad => Nodo::Dpad(Dpad {
                 centro: p,
                 arriba: "W".into(),
@@ -741,6 +730,8 @@ impl Editor {
                 activacion_ms: 0,
                 velocidad_inicial: 0.0,
                 zona_muerta: 0.0,
+                mando: Vec::new(),
+                stick: String::new(),
                 extra: extra(),
             }),
             Tipo::Apuntar => {
@@ -763,13 +754,13 @@ impl Editor {
                 derecha: "Key_Right".into(),
                 velocidad: 1.0,
                 espera_orilla_ms: 300,
-                extra: extra(),
+                mando: Vec::new(), extra: extra(),
             }),
             Tipo::Script => Nodo::Script(ScriptNodo {
                 key: String::new(),
                 pos: p,
                 texto: format!("# Toca donde está el control\ntap {:.1} {:.1}\n", p.x * 100.0, p.y * 100.0),
-                extra: extra(),
+                mando: Vec::new(), extra: extra(),
             }),
             Tipo::Deslizar => Nodo::Deslizar(Deslizar {
                 pos: p,
@@ -780,7 +771,7 @@ impl Editor {
                 radio: 0.08,
                 velocidad: 1.0,
                 mantener: false,
-                extra: extra(),
+                mando: Vec::new(), extra: extra(),
             }),
             Tipo::Zoom => Nodo::Zoom(Zoom {
                 pos: p,
@@ -793,9 +784,9 @@ impl Editor {
                 modo: 0,
                 espera_ms: 300,
                 exclusivo: false,
-                extra: extra(),
+                mando: Vec::new(), extra: extra(),
             }),
-            Tipo::MobaDpad => Nodo::MobaDpad(MobaDpad { pos: p, radio: 0.08, heroe: Punto::nuevo(0.5, 0.55), velocidad_heroe: 0.35, cancelar: String::new(), extra: extra() }),
+            Tipo::MobaDpad => Nodo::MobaDpad(MobaDpad { pos: p, radio: 0.08, heroe: Punto::nuevo(0.5, 0.55), velocidad_heroe: 0.35, cancelar: String::new(), mando: Vec::new(), extra: extra() }),
             Tipo::Habilidad => Nodo::MobaHabilidad(MobaHabilidad {
                 key: String::new(),
                 pos: p,
@@ -804,7 +795,7 @@ impl Editor {
                 detener_dpad: false,
                 cancelar: String::new(),
                 cancelar_pos: None,
-                extra: extra(),
+                mando: Vec::new(), extra: extra(),
             }),
             Tipo::Rotar => Nodo::Rotar(Rotar {
                 pos: p,
@@ -814,7 +805,7 @@ impl Editor {
                 angulo: 0.0,
                 velocidad: 90.0,
                 activacion_ms: 0,
-                extra: extra(),
+                mando: Vec::new(), extra: extra(),
             }),
             Tipo::Borde => Nodo::Borde(Borde {
                 pos: Punto::nuevo(0.5, 0.5),
@@ -1176,12 +1167,24 @@ impl Editor {
             }
         };
         titulo(ui, glifo, nombre);
-        for (k, (texto, tecla)) in teclas(&nodo).into_iter().enumerate() {
-            // Las teclas de dirección de la mirada libre solo sirven con el teclado.
-            if matches!(&nodo, Nodo::MiradaLibre(m) if !m.teclado) && k > 0 {
-                continue;
+        // Las teclas de dirección de la mirada libre solo sirven con el teclado.
+        let casillas: Vec<(usize, &str, String)> = teclas(&nodo)
+            .into_iter()
+            .enumerate()
+            .filter(|(k, _)| !matches!(&nodo, Nodo::MiradaLibre(m) if !m.teclado) || *k == 0)
+            .map(|(k, (texto, tecla))| (k, texto, tecla))
+            .collect();
+        for (k, texto, tecla) in &casillas {
+            let tecla = if mapeo::es_mando(tecla) { "" } else { tecla.as_str() };
+            self.boton_tecla(ui, texto, tecla, Objetivo::Tecla(i, *k));
+        }
+        // Los botones del mando de esas teclas (la pestaña «Gamepad» de BlueStacks).
+        if !casillas.is_empty() {
+            seccion(ui, "Mando");
+            for (k, texto, _) in &casillas {
+                let boton = nodo.mando_de(*k).to_string();
+                self.boton_tecla(ui, texto, &boton, Objetivo::MandoNodo(i, *k));
             }
-            self.boton_tecla(ui, texto, &tecla, Objetivo::Tecla(i, k));
         }
         let Some(nodo) = self.mapa.nodos.get_mut(i) else { return };
         if let Some(p) = punto_mut(nodo, 0) {
@@ -1212,6 +1215,11 @@ impl Editor {
                 numero(ui, "Por segundo", &mut r.por_segundo, 1.0..=30.0, "toques");
             }
             Nodo::Dpad(d) => {
+                ui.horizontal(|ui| {
+                    ui.add_sized(Vec2::new(86.0, 20.0), egui::Label::new(RichText::new("Joystick").color(ICONO)));
+                    selector_joystick(ui, "joystick-dpad", &mut d.stick);
+                });
+                nota(ui, "Con un joystick del mando, el dedo va tan lejos como lo inclines.");
                 let mut radio = d.radio();
                 if numero(ui, "Radio", &mut radio, 0.015..=0.25, "") {
                     d.fijar_radio(radio);
@@ -1574,17 +1582,7 @@ fn ajustes_mando(ui: &mut egui::Ui, r: &mut Raton, esperando: &mut Option<Objeti
 
     seccion(ui, "Propiedades");
     rejilla(ui, "mando-propiedades", |ui| {
-        fila(ui, "Joystick", |ui| {
-            let opciones = [("", "Ninguno"), ("LeftStick", "Izquierdo"), ("RightStick", "Derecho")];
-            let actual = opciones.iter().find(|o| o.0 == m.stick).map_or("Ninguno", |o| o.1);
-            egui::ComboBox::from_id_salt("joystick-mando").selected_text(actual).show_ui(ui, |ui| {
-                for (valor, nombre) in opciones {
-                    if ui.selectable_label(m.stick == valor, nombre).clicked() {
-                        m.stick = valor.to_string();
-                    }
-                }
-            });
-        });
+        fila(ui, "Joystick", |ui| selector_joystick(ui, "joystick-mando", &mut m.stick));
         fila(ui, "Sensibilidad del mando", |ui| {
             decimal(ui, &mut m.sens, 0.01..=100.0);
         });
@@ -1618,8 +1616,21 @@ fn ajustes_mando(ui: &mut egui::Ui, r: &mut Raton, esperando: &mut Option<Objeti
     nota(ui, &if conectados.is_empty() { "No hay ningún mando conectado.".to_string() } else { format!("Mandos: {}.", conectados.join(", ")) });
     nota(
         ui,
-        "Con un joystick o un botón asignado, el mando mueve la puntería y deja de llegarle a Android mientras juegas este juego. La posición, la mira y «Ajustes» son los de la otra pestaña.",
+        "Si este juego tiene botones del mando (aquí o en sus controles, en «Mando»), mientras lo juegas el mando es de los controles y no le llega a Android. La posición, la mira y «Ajustes» son los de la otra pestaña.",
     );
+}
+
+/// Qué joystick del mando (`LeftStick`, `RightStick` o ninguno).
+fn selector_joystick(ui: &mut egui::Ui, id: &str, stick: &mut String) {
+    let opciones = [("", "Ninguno"), ("LeftStick", "Izquierdo"), ("RightStick", "Derecho")];
+    let actual = opciones.iter().find(|o| o.0 == stick.as_str()).map_or("Ninguno", |o| o.1);
+    egui::ComboBox::from_id_salt(id).selected_text(actual).show_ui(ui, |ui| {
+        for (valor, nombre) in opciones {
+            if ui.selectable_label(stick.as_str() == valor, nombre).clicked() {
+                *stick = valor.to_string();
+            }
+        }
+    });
 }
 
 /// Una pestaña de la ventana, subrayada si es la elegida (como las de BlueStacks). Devuelve si se tocó.
@@ -1700,7 +1711,7 @@ fn selector_tecla(ui: &mut egui::Ui, esperando: &mut Option<Objetivo>, tecla: &s
     let texto = if activo {
         "Presiona…".to_string()
     } else if tecla.is_empty() {
-        if matches!(objetivo, Objetivo::Mando(_)) { "Sin botón" } else { "Sin tecla" }.to_string()
+        if matches!(objetivo, Objetivo::Mando(_) | Objetivo::MandoNodo(..)) { "Sin botón" } else { "Sin tecla" }.to_string()
     } else {
         etiqueta(tecla)
     };

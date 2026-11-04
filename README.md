@@ -24,9 +24,11 @@ teclas y una puntería que se siente como la de BlueStacks. Todo lo que hay entr
   desplazar y disparar», con los campos de BlueStacks: iniciar/detener y suspender, sensibilidad X e Y,
   «Ajustes» (los Tweaks), aceleración del mouse, punto de mira (estilo o imagen propia, tamaño, opacidad
   y color, y se arrastra), disparar con clic izquierdo, mirar alrededor y mostrar las teclas en
-  pantalla. Su pestaña «Gamepad» hace que el joystick del mando gire la cámara (con su propia
-  sensibilidad y zona muerta) y que sus botones entren a la puntería, la suspendan, miren alrededor o
-  disparen; mientras tanto el mando no le llega a Android. Varios esquemas de controles por juego, que
+  pantalla. **Con mando, como en BlueStacks:** cada tecla de cada control puede tener también un botón
+  o una combinación del mando (como LB + X), el D-pad se mueve con un joystick (tan lejos como lo
+  inclines) y la pestaña «Gamepad» de la puntería hace que el otro joystick gire la cámara con su
+  propia sensibilidad y zona muerta. Mientras juegas un juego que usa el mando, el mando es de sus
+  controles y no le llega a Android. Varios esquemas de controles por juego, que
   se importan, exportan y cambian desde el menú rápido. Lee los mapas de SwagPlayer y QtScrcpy. La
   inclinación no está: este Android no tiene sensores.
 - **Puntería como BlueStacks:** el mouse se lee directo (evdev) y la cámara usa la misma fórmula que
