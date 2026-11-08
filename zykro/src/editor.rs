@@ -617,6 +617,12 @@ impl Editor {
         matches!(self.esperando, Some(Objetivo::Mando(_) | Objetivo::MandoNodo(..)))
     }
 
+    pub fn tecla_egui(&mut self, logica: egui::Key, fisica: Option<egui::Key>) {
+        if let Some(nombre) = mapeo::nombre_tecla_evento(logica, fisica) {
+            self.tecla(&nombre);
+        }
+    }
+
     /// Tecla presionada mientras el editor está abierto.
     pub fn tecla(&mut self, nombre: &str) {
         let Some(obj) = self.esperando.take() else {
@@ -1824,6 +1830,24 @@ fn elegir_json(guardar: bool, nombre: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod pruebas {
     use super::*;
+
+    #[test]
+    fn asigna_la_tecla_sobre_tab_y_distingue_otro_pipe() {
+        use egui::Key;
+
+        let mut editor = Editor::new();
+        editor.mapa.cambio = "F".into();
+        editor.esperando = Some(Objetivo::Cambio);
+
+        // En LATAM, AltGr+1 también escribe |.
+        editor.tecla_egui(Key::Pipe, Some(Key::Num1));
+        assert_eq!(editor.esperando, Some(Objetivo::Cambio));
+        assert_eq!(editor.mapa.cambio, "F");
+
+        editor.tecla_egui(Key::Pipe, Some(Key::Backtick));
+        assert_eq!(editor.esperando, None);
+        assert_eq!(editor.mapa.cambio, "Key_QuoteLeft");
+    }
 
     fn textos(forma: &egui::Shape, salida: &mut Vec<String>) {
         match forma {

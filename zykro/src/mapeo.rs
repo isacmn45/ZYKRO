@@ -1074,6 +1074,12 @@ pub fn nombre_tecla(k: egui::Key) -> Option<String> {
     )
 }
 
+/// La tecla física sobre Tab conserva el nombre del mapeo aunque el teclado produzca otro símbolo.
+pub fn nombre_tecla_evento(logica: egui::Key, fisica: Option<egui::Key>) -> Option<String> {
+    let tecla = if fisica == Some(egui::Key::Backtick) { egui::Key::Backtick } else { logica };
+    nombre_tecla(tecla)
+}
+
 pub fn nombre_boton(b: PointerButton) -> &'static str {
     match b {
         PointerButton::Primary => "LeftButton",
@@ -2909,6 +2915,40 @@ fn codigo_android(nombre: &str) -> Option<u32> {
 #[cfg(test)]
 mod pruebas {
     use super::*;
+
+    #[test]
+    fn backquote_de_evdev_activa_un_switchkey_existente() {
+        use egui::Key;
+        use winit::keyboard::{KeyCode, PhysicalKey};
+        use winit::platform::scancode::PhysicalKeyExtScancode;
+
+        assert_eq!(PhysicalKey::from_scancode(41), PhysicalKey::Code(KeyCode::Backquote));
+        assert_eq!(PhysicalKey::from_scancode(2), PhysicalKey::Code(KeyCode::Digit1));
+        assert_eq!(nombre_tecla_evento(Key::Pipe, Some(Key::Num1)), None);
+        assert_eq!(nombre_tecla_evento(Key::Pipe, None), None);
+        assert_eq!(nombre_tecla_evento(Key::Num1, Some(Key::Num1)).as_deref(), Some("1"));
+
+        let arriba_de_tab = Some(Key::Backtick);
+        let latam = nombre_tecla_evento(Key::Pipe, arriba_de_tab).unwrap();
+        let us = nombre_tecla_evento(Key::Backtick, arriba_de_tab).unwrap();
+        assert_eq!(latam, us);
+        assert_eq!(nombre_tecla_evento(Key::Backtick, None).as_deref(), Some(us.as_str()));
+
+        let json = serde_json::from_str(include_str!("../../config/keymap/com.dts.freefireth.json")).unwrap();
+        let mapa = Mapa::desde_json(json).unwrap();
+        assert_eq!(mapa.cambio, latam);
+        assert_eq!(mapa.a_json()["switchKey"], "Key_QuoteLeft");
+        assert_eq!(codigo_android(&latam), Some(68));
+        toques(mapa, |motor, ctl| {
+            assert!(motor.tecla(&latam, true, false, ctl, W, H));
+            assert!(motor.apuntando);
+            assert!(motor.tecla(&latam, true, true, ctl, W, H));
+            assert!(motor.tecla(&latam, false, false, ctl, W, H));
+            assert!(motor.apuntando);
+            assert!(motor.tecla(&us, true, false, ctl, W, H));
+            assert!(!motor.apuntando);
+        });
+    }
 
     /// La puntería manda lo mismo que BlueStacks: bajar en `startPos` y luego la posición calculada
     /// desde el ancla con el total acumulado (curva en X, lineal en Y), un toque por movimiento.

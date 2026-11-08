@@ -968,10 +968,8 @@ impl Zykro {
         let escribiendo = ctx.egui_wants_keyboard_input() && !self.editor.esperando_tecla();
         for evento in eventos {
             match evento {
-                Event::Key { key, pressed: true, repeat: false, .. } if !escribiendo => {
-                    if let Some(nombre) = mapeo::nombre_tecla(key) {
-                        self.editor.tecla(&nombre);
-                    }
+                Event::Key { key, physical_key, pressed: true, repeat: false, .. } if !escribiendo => {
+                    self.editor.tecla_egui(key, physical_key);
                 }
                 Event::PointerButton { button, pressed: true, .. } if button != PointerButton::Primary && self.editor.esperando_tecla() => {
                     self.editor.tecla(mapeo::nombre_boton(button));
@@ -1421,9 +1419,9 @@ impl Zykro {
                         ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
                     }
                 }
-                Event::Key { key, pressed, repeat, modifiers, .. } => {
+                Event::Key { key, physical_key, pressed, repeat, modifiers } => {
                     if activo {
-                        if let Some(nombre) = mapeo::nombre_tecla(key) {
+                        if let Some(nombre) = mapeo::nombre_tecla_evento(key, physical_key) {
                             if self.motor().tecla(&nombre, pressed, repeat, &control, ancho, alto) {
                                 continue;
                             }
