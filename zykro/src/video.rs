@@ -9,7 +9,7 @@ use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use eframe::egui::{Color32, ColorImage};
 use memmap2::{Mmap, MmapOptions};
@@ -141,6 +141,39 @@ pub static NUEVO: AtomicBool = AtomicBool::new(false);
 /// Cuadros como máximo en la cola: si se acumulan más, se tiran los viejos para no sumar retraso.
 const MAX_COLA: usize = 2;
 
+/// Muestra del hilo de recepción, antes de que la ventana consuma la cola (`ZYKRO_RITMO=1`).
+struct MedidaRecepcion {
+    desde: Instant,
+    recibidos: u32,
+    copiados: u32,
+    descartados: usize,
+    preparacion_max: Duration,
+}
+
+impl MedidaRecepcion {
+    fn nueva(desde: Instant) -> Self {
+        Self { desde, recibidos: 0, copiados: 0, descartados: 0, preparacion_max: Duration::ZERO }
+    }
+
+    fn anotar(&mut self, recibido: Instant, llegada: Instant, copiado: bool, descartados: usize) {
+        self.recibidos += 1;
+        self.copiados += u32::from(copiado);
+        self.descartados += descartados;
+        self.preparacion_max = self.preparacion_max.max(llegada.saturating_duration_since(recibido));
+        let segundos = llegada.duration_since(self.desde).as_secs_f64();
+        if segundos >= 1.0 {
+            eprintln!(
+                "[ritmo] recepción: {:.1} cuadros/s, {} copiados por CPU, {} descartados por cola llena, preparación máx. {:.1} ms ({segundos:.2} s)",
+                f64::from(self.recibidos) / segundos,
+                self.copiados,
+                self.descartados,
+                self.preparacion_max.as_secs_f64() * 1000.0,
+            );
+            *self = Self::nueva(llegada);
+        }
+    }
+}
+
 /// Datos de la cabecera DMB2.
 pub struct Pantalla {
     pub ancho: u32,
@@ -193,6 +226,7 @@ pub fn leer_cabecera(socket: &mut UnixStream) -> io::Result<Pantalla> {
 pub fn recibir_cuadros(socket: UnixStream, destino: Compartido, mut nuevo: impl FnMut()) -> io::Result<()> {
     let mut buffers: HashMap<u32, Arc<Buffer>> = HashMap::new();
     let mut paquete = [0u8; 64];
+    let mut medida = std::env::var_os("ZYKRO_RITMO").map(|_| MedidaRecepcion::nueva(Instant::now()));
     loop {
         let (n, mut fds) = recibir(&socket, &mut paquete)?;
         if n == 0 {
@@ -223,14 +257,20 @@ pub fn recibir_cuadros(socket: UnixStream, destino: Compartido, mut nuevo: impl 
                 }
                 let Some(b) = buffers.get(&id) else { continue };
                 let copia = COPIAR.load(Ordering::Relaxed).then(|| ColorImage::new([b.ancho, b.alto], b.leer()));
+                let copiado = copia.is_some();
                 let mut cola = destino.lock().unwrap();
-                cola.push_back(Cuadro { buffer: b.clone(), copia, llegada: Instant::now(), recibido });
+                let llegada = Instant::now();
+                cola.push_back(Cuadro { buffer: b.clone(), copia, llegada, recibido });
+                let descartados = cola.len().saturating_sub(MAX_COLA);
                 while cola.len() > MAX_COLA {
                     cola.pop_front();
                 }
                 NUEVO.store(true, Ordering::Relaxed);
                 drop(cola);
                 nuevo();
+                if let Some(m) = &mut medida {
+                    m.anotar(recibido, llegada, copiado, descartados);
+                }
             }
             _ => {}
         }

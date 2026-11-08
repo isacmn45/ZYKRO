@@ -232,17 +232,50 @@ final class Video {
             if (buffer == null) {
                 return;
             }
-            Descripcion d;
+            int id;
             try {
-                d = Descripcion.de(buffer);
+                id = registrar(buffer);
             } finally {
                 buffer.close();
             }
+            ByteBuffer m = ByteBuffer.allocate(12);
+            m.put("DMBX".getBytes(StandardCharsets.US_ASCII)).putInt(id).putInt(++cuadros);
+            salida.write(m.array());
+        }
+
+        private int registrar(HardwareBuffer buffer) throws IOException {
+            // Android 13 todavía no expone HardwareBuffer.getId() en Java. Del Parcel solo hace
+            // falta leer el identificador cuando el cliente ya tiene el descriptor del buffer.
+            Parcel p = Parcel.obtain();
             try {
-                Integer id = registrados.get(d.id);
-                if (id == null) {
-                    id = registrados.size() + 1;
-                    registrados.put(d.id, id);
+                buffer.writeToParcel(p, 0);
+                p.setDataPosition(0);
+                int largo = p.readInt() / Integer.BYTES;
+                int nfds = p.readInt();
+                if (nfds <= 0 || largo < 11) {
+                    throw new IOException("buffer sin dma-buf");
+                }
+                int inicio = p.dataPosition();
+                int tipo = p.readInt();
+                int indice;
+                if (tipo == GB01) {
+                    indice = 7;
+                } else if (tipo == GBFR) {
+                    indice = 6;
+                } else {
+                    throw new IOException("formato de buffer desconocido " + Integer.toHexString(tipo));
+                }
+                p.setDataPosition(inicio + indice * Integer.BYTES);
+                long clave = ((long) p.readInt() << 32) | (p.readInt() & 0xffffffffL);
+                Integer conocido = registrados.get(clave);
+                if (conocido != null) {
+                    return conocido;
+                }
+
+                p.setDataPosition(inicio);
+                Descripcion d = Descripcion.leer(p, largo, nfds, tipo == GB01 ? 13 : 11);
+                int id = registrados.size() + 1;
+                try {
                     ByteBuffer m = ByteBuffer.allocate(45);
                     m.put("DMBR".getBytes(StandardCharsets.US_ASCII)).putInt(id).putInt(d.ancho).putInt(d.alto).putInt(d.stride)
                         .putInt(d.tamano).putInt(d.formato).putInt(d.ancho).putInt(d.alto).putLong(d.modificador).put((byte) 0);
@@ -252,21 +285,21 @@ final class Video {
                     } finally {
                         cliente.setFileDescriptorsForSend(null);
                     }
+                    registrados.put(clave, id);
                     Log.i(Servidor.ETIQUETA, "video: buffer " + id + " " + d.ancho + "x" + d.alto + " stride " + d.stride
                         + " tamaño " + d.tamano + " modificador " + d.modificador);
+                    return id;
+                } finally {
+                    d.cerrar();
                 }
             } finally {
-                d.cerrar();
+                p.recycle();
             }
-            ByteBuffer m = ByteBuffer.allocate(12);
-            m.put("DMBX".getBytes(StandardCharsets.US_ASCII)).putInt(registrados.get(d.id)).putInt(++cuadros);
-            salida.write(m.array());
         }
     }
 
     /** Lo que ZYKRO necesita de un buffer, sacado de cómo Android lo pasa entre procesos. */
     private static final class Descripcion {
-        long id;
         int ancho;
         int alto;
         int stride;
@@ -279,36 +312,16 @@ final class Video {
          * Un HardwareBuffer se escribe en un Parcel como su GraphicBuffer: largo, cantidad de fds,
          * los enteros de GraphicBuffer::flatten y los fds (copias). Así se obtiene el dma-buf sin NDK.
          */
-        static Descripcion de(HardwareBuffer buffer) throws IOException {
-            Parcel p = Parcel.obtain();
+        static Descripcion leer(Parcel p, int largo, int nfds, int enteros) {
             Descripcion d = new Descripcion();
             try {
-                buffer.writeToParcel(p, 0);
-                p.setDataPosition(0);
-                int largo = p.readInt();
-                int nfds = p.readInt();
-                int[] g = new int[largo / 4];
+                int[] g = new int[largo];
                 for (int i = 0; i < g.length; i++) {
                     g[i] = p.readInt();
                 }
                 d.fds = new ParcelFileDescriptor[nfds];
                 for (int i = 0; i < nfds; i++) {
                     d.fds[i] = p.readFileDescriptor();
-                }
-                if (nfds == 0 || g.length < 11) {
-                    d.cerrar();
-                    throw new IOException("buffer sin dma-buf");
-                }
-                int enteros;
-                if (g[0] == GB01) {
-                    d.id = ((long) g[7] << 32) | (g[8] & 0xffffffffL);
-                    enteros = 13;
-                } else if (g[0] == GBFR) {
-                    d.id = ((long) g[6] << 32) | (g[7] & 0xffffffffL);
-                    enteros = 11;
-                } else {
-                    d.cerrar();
-                    throw new IOException("formato de buffer desconocido " + Integer.toHexString(g[0]));
                 }
                 d.ancho = g[1];
                 d.alto = g[2];
@@ -327,8 +340,9 @@ final class Video {
                     d.tamano = d.stride * d.alto;
                 }
                 return d;
-            } finally {
-                p.recycle();
+            } catch (RuntimeException e) {
+                d.cerrar();
+                throw e;
             }
         }
 
