@@ -485,7 +485,7 @@ impl Zykro {
             Accion::Recientes => self.alternar_recientes(ctx),
             Accion::Notificaciones if self.panel.abierto() => self.panel.cerrar(),
             Accion::Notificaciones => self.panel.abrir(ctx),
-            Accion::InstalarApk => android::instalar_apk(self.estado.clone()),
+            Accion::InstalarApk => android::instalar_apk(ctx, self.estado.clone()),
             Accion::Fondos => self.fondos.abrir(ctx),
             Accion::Editor => self.abrir_editor(),
             Accion::Controles => {
@@ -1150,7 +1150,7 @@ impl Zykro {
                         self.captura();
                     }
                     if icono(ui, ic::PACKAGE, &self.ayuda("Instalar APK", atajos::Accion::InstalarApk), t, FONDO_HOVER).clicked() {
-                        android::instalar_apk(self.estado.clone());
+                        android::instalar_apk(ctx, self.estado.clone());
                     }
                 });
                 ui.with_layout(Layout::bottom_up(Align::Center), |ui| {

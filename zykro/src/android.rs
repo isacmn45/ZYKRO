@@ -953,25 +953,8 @@ fn detener_apps() {
     shell(&format!("for p in $(pm list packages -3); do p=${{p#package:}}; [ $p = {INICIO} ] || am force-stop $p; done"));
 }
 
-pub fn instalar_apk(estado: EstadoCompartido) {
-    thread::spawn(move || {
-        let elegido = Command::new("kdialog")
-            .args(["--title", "Instalar APK", "--getopenfilename", ".", "*.apk|Aplicaciones Android"])
-            .output();
-        let Ok(salida) = elegido else { return };
-        let ruta = String::from_utf8_lossy(&salida.stdout).trim().to_string();
-        if ruta.is_empty() {
-            return;
-        }
-        let nombre = Path::new(&ruta).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        avisar(&estado, format!("Instalando {nombre}…"));
-        let destino = format!("{CONTENEDOR}:/data/local/tmp/zykro.apk");
-        let ok = docker(&["cp", &ruta, &destino])
-            && docker(&["exec", CONTENEDOR, "pm", "install", "-r", "/data/local/tmp/zykro.apk"]);
-        docker(&["exec", CONTENEDOR, "rm", "-f", "/data/local/tmp/zykro.apk"]);
-        avisar(&estado, if ok { format!("{nombre} instalada") } else { format!("No se pudo instalar {nombre}") });
-    });
-}
+mod apk;
+pub use apk::instalar_apk;
 
 /// Código de tecla de Android (`AKEYCODE_*`) para una tecla de la laptop.
 pub fn tecla_android(tecla: egui::Key) -> Option<u32> {
