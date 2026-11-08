@@ -53,7 +53,8 @@ impl Pantalla {
     }
 
     pub fn mostrar(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame, cuadro: &mut Cuadro) {
-        if !self.probado {
+        let primer_cuadro = !self.probado;
+        if primer_cuadro {
             self.probado = true;
             self.gpu = Importador::nuevo(frame);
             if self.gpu.is_none() {
@@ -64,6 +65,10 @@ impl Pantalla {
         if let (Some(gpu), Some(gl)) = (&mut self.gpu, frame.gl().cloned()) {
             match gpu.textura(&gl, frame, &cuadro.buffer) {
                 Ok(id) => {
+                    if primer_cuadro {
+                        let renderizador = unsafe { gl.get_parameter_string(glow::RENDERER) };
+                        eprintln!("[video] importación DMA-BUF activa ({renderizador})");
+                    }
                     self.id = Some(id);
                     return;
                 }
