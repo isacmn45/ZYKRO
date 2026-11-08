@@ -320,10 +320,32 @@ pub fn aplazado() -> bool {
     APLAZADO.get()
 }
 
-/// Hasta cuándo esperar el aviso de KWin, si hay algo aplazado.
-pub fn limite() -> Option<Instant> {
+/// Hasta cuándo esperar el aviso de Wayland, si hay algo aplazado.
+pub fn limite(video_pendiente: bool) -> Option<Instant> {
     if !APLAZADO.get() {
         return None;
     }
-    RITMO.with_borrow(|r| r.as_ref().map(|r| r.enviado + ESPERA_MAX))
+    RITMO.with_borrow(|r| {
+        r.as_ref().map(|r| vencimiento(r.enviado, r.enviado_video, video_pendiente))
+    })
+}
+
+fn vencimiento(enviado: Instant, enviado_video: Instant, video_pendiente: bool) -> Instant {
+    // Si hay video pendiente, video_libre() permite dibujarlo aunque la interfaz haya enviado
+    // un cuadro más reciente. El temporizador tiene que respetar ese mismo plazo.
+    let inicio = if video_pendiente { enviado_video } else { enviado };
+    inicio + ESPERA_MAX
+}
+
+#[cfg(test)]
+mod pruebas {
+    use super::*;
+
+    #[test]
+    fn redibujar_la_interfaz_no_alarga_la_espera_del_video_pendiente() {
+        let video = Instant::now();
+        let interfaz = video + Duration::from_millis(20);
+        assert_eq!(vencimiento(interfaz, video, true), video + ESPERA_MAX);
+        assert_eq!(vencimiento(interfaz, video, false), interfaz + ESPERA_MAX);
+    }
 }

@@ -204,8 +204,8 @@ impl ApplicationHandler<eframe::UserEvent> for Ventana<'_> {
             self.app.window_event(bucle, id, WindowEvent::RedrawRequested);
         }
         self.app.about_to_wait(bucle);
-        // Despertar a más tardar cuando venza la espera del aviso de KWin.
-        if let Some(limite) = ritmo::limite() {
+        // Despertar a más tardar cuando venza la espera del aviso de Wayland.
+        if let Some(limite) = ritmo::limite(video::NUEVO.load(Ordering::Relaxed)) {
             let flujo = match bucle.control_flow() {
                 ControlFlow::WaitUntil(t) if t < limite => ControlFlow::WaitUntil(t),
                 ControlFlow::Poll => ControlFlow::Poll,
