@@ -272,15 +272,31 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
     ctx.request_repaint();
     let ruta_video = format!("{SOCKETS}/video.sock");
     let ruta_control = format!("{SOCKETS}/control.sock");
+    let mut inicio_preparado = false;
+    let mut error_inicio = false;
     let mut socket_video = loop {
         if Path::new(&ruta_video).exists() && Path::new(&ruta_control).exists() {
-            match video::conectar(&ruta_video) {
-                Ok(socket) => break socket,
-                // Mientras Android arranca quedan los sockets de la sesión anterior, sin nadie
-                // escuchando: se sigue esperando a que el servidor los vuelva a crear.
-                Err(e) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound) => {}
-                Err(e) => return Err(e),
+            // En un reinicio pueden quedar los sockets anteriores. Package Manager y la sesión
+            // del usuario tienen que estar listos antes de preparar el inicio.
+            if !inicio_preparado && shell("getprop sys.boot_completed").is_some_and(|v| v.trim() == "1") {
+                mensaje(estado, Etapa::Conectar, "Preparando el inicio de ZYKRO…");
+                ctx.request_repaint();
+                if let Err(e) = asegurar_inicio() {
+                    eprintln!("[android] no se pudo preparar el inicio de ZYKRO: {e}");
+                    error_inicio = true;
+                }
+                inicio_preparado = true;
             }
+            if inicio_preparado {
+                match video::conectar(&ruta_video) {
+                    Ok(socket) => break socket,
+                    Err(e) if matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        if !corriendo() {
+            return Err(std::io::Error::other("Android se detuvo antes de abrir la pantalla"));
         }
         thread::sleep(Duration::from_millis(300));
     };
@@ -310,11 +326,14 @@ fn conectar_y_recibir(ctx: &egui::Context, estado: &EstadoCompartido, destino: &
         s.mensaje.clear();
         s.error = false;
     }
+    if error_inicio {
+        avisar(estado, "No se pudo preparar el inicio de ZYKRO");
+    }
     if ocultar_teclado {
         ocultar_teclado_en_pantalla();
     }
     poner_zona_horaria();
-    asegurar_inicio();
+    thread::spawn(permisos_inicio);
     quitar_sobrantes();
     let config = estado.lock().unwrap().config.clone();
     aplicar_preferencias(&config);
@@ -439,53 +458,103 @@ fn quitar_sobrantes() {
 
 /// Paquete de la pantalla de inicio de ZYKRO (`launcher/` de este repositorio).
 pub const INICIO: &str = "com.zykro.inicio";
+const ACTIVIDAD_INICIO: &str = "com.zykro.inicio/.Inicio";
+const INTENTO_INICIO: &str = "-a android.intent.action.MAIN -c android.intent.category.HOME";
 
-/// Instala la pantalla de inicio de ZYKRO en Android si falta o si instalar.sh dejó otra versión
-/// (~/.local/share/zykro/zykro-inicio.apk). La primera vez desactiva el launcher de fábrica para que
-/// Android no pregunte cuál usar.
-fn asegurar_inicio() {
-    let datos = std::env::var_os("XDG_DATA_HOME")
+/// Prepara Home antes de conectar el video. Si ya hay otra app al frente, se conserva su tarea.
+fn asegurar_inicio() -> Result<(), String> {
+    let estaba = shell(&format!("pm path --user 0 {INICIO}")).is_some_and(|s| s.starts_with("package:"));
+    let datos_locales = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share"));
+    let apk = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
-    let Some(apk) = datos.map(|d| d.join("zykro/zykro-inicio.apk")).filter(|p| p.exists()) else { return };
-    thread::spawn(move || {
+        .into_iter()
+        .chain(datos_locales)
+        .map(|d| d.join("zykro/zykro-inicio.apk"))
+        .find(|p| p.is_file());
+    if let Some(apk) = apk {
         // Tamaño y fecha del APK: si no cambiaron y sigue instalado, no hay nada que hacer.
         let marca = apk.with_extension("instalado");
         let firma = std::fs::metadata(&apk)
             .map(|m| format!("{} {:?}", m.len(), m.modified().ok()))
-            .unwrap_or_default();
-        let ruta = Command::new("docker").args(["exec", CONTENEDOR, "pm", "path", INICIO]).output();
-        let estaba = ruta.is_ok_and(|s| String::from_utf8_lossy(&s.stdout).contains("package:"));
-        if estaba && std::fs::read_to_string(&marca).is_ok_and(|m| m == firma) {
-            permisos_inicio();
-            return;
+            .map_err(|e| e.to_string())?;
+        if !estaba || !std::fs::read_to_string(&marca).is_ok_and(|m| m == firma) {
+            instalar_inicio(&apk)?;
+            let _ = std::fs::write(&marca, firma);
         }
-        let destino = "/data/local/tmp/zykro-inicio.apk";
-        if !docker(&["cp", &apk.to_string_lossy(), &format!("{CONTENEDOR}:{destino}")]) {
-            return;
+    } else if !estaba {
+        return Err("falta zykro-inicio.apk; vuelve a ejecutar instalar.sh".into());
+    }
+
+    let home = shell(&format!("cmd package resolve-activity --brief --user 0 {INTENTO_INICIO}"))
+        .ok_or("no se pudo consultar la aplicación de inicio")?;
+    if home.lines().last().map(str::trim) != Some(ACTIVIDAD_INICIO) {
+        shell(&format!("cmd package set-home-activity --user 0 {ACTIVIDAD_INICIO}"))
+            .ok_or("Android no pudo elegir ZYKRO como aplicación de inicio")?;
+    }
+
+    // Android puede haber arrancado Launcher3 antes de que ZYKRO quedara como Home. Si hay un
+    // juego (o una ventana de Ajustes), el cambio de Home solo se aplica la próxima vez que se use.
+    let mut abierto = false;
+    let limite = Instant::now() + Duration::from_secs(30);
+    loop {
+        let actual = shell("dumpsys activity top-resumed").ok_or("no se pudo consultar la actividad al frente")?;
+        let componente = actual.lines().find_map(|l| l.trim().strip_prefix("mActivityComponent="));
+        if componente == Some(ACTIVIDAD_INICIO) {
+            if actual.contains(" reportedDrawn=true ") {
+                return Ok(());
+            }
+        } else if inicio_provisional(componente, &actual)
+            || (componente.is_none() && (abierto || RECIEN_ENCENDIDO.load(Ordering::Relaxed)))
+        {
+            if !abierto {
+                let salida = shell(&format!("am start -W --user 0 {INTENTO_INICIO} -n {ACTIVIDAD_INICIO}"));
+                if !salida.is_some_and(|s| s.lines().any(|l| l.trim() == "Status: ok")) {
+                    return Err("Android no pudo abrir la pantalla de inicio".into());
+                }
+                abierto = true;
+                continue;
+            }
+        } else {
+            return Ok(());
         }
-        let instalar = || {
-            let salida = Command::new("docker").args(["exec", CONTENEDOR, "pm", "install", "-r", destino]).output().ok()?;
-            Some(String::from_utf8_lossy(&salida.stdout).to_string() + &String::from_utf8_lossy(&salida.stderr))
-        };
-        let mut resultado = instalar().unwrap_or_default();
-        // Compilada con otra llave (otra copia del repositorio): se quita la vieja y se instala de nuevo.
-        if resultado.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
-            docker(&["exec", CONTENEDOR, "pm", "uninstall", INICIO]);
-            resultado = instalar().unwrap_or_default();
+        if Instant::now() >= limite {
+            return Err("la pantalla de inicio no terminó de dibujarse".into());
         }
-        docker(&["exec", CONTENEDOR, "rm", "-f", destino]);
-        if !resultado.contains("Success") {
-            eprintln!("[android] no se pudo instalar la pantalla de inicio: {}", resultado.trim());
-            return;
+        thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn inicio_provisional(componente: Option<&str>, actividad: &str) -> bool {
+    componente.is_some_and(|c| {
+        c.starts_with("com.android.launcher3/")
+            || c == "com.android.settings/.FallbackHome"
+            || (c == "android/com.android.internal.app.ResolverActivity"
+                && actividad.lines().any(|l| l.trim_start().starts_with("Intent {") && l.contains("cat=[android.intent.category.HOME]")))
+    })
+}
+
+fn instalar_inicio(apk: &Path) -> Result<(), String> {
+    let destino = "/data/local/tmp/zykro-inicio.apk";
+    if !copiar_a(apk, destino) {
+        return Err("no se pudo copiar zykro-inicio.apk a Android".into());
+    }
+    let instalar = || {
+        let salida = Command::new("docker").args(["exec", CONTENEDOR, "pm", "install", "-r", destino]).output();
+        match salida {
+            Ok(s) if s.status.success() && String::from_utf8_lossy(&s.stdout).lines().any(|l| l.trim() == "Success") => Ok(()),
+            Ok(s) => Err(format!("{}{}", String::from_utf8_lossy(&s.stdout), String::from_utf8_lossy(&s.stderr)).trim().into()),
+            Err(e) => Err(e.to_string()),
         }
-        if !estaba {
-            docker(&["exec", CONTENEDOR, "pm", "disable-user", "--user", "0", "com.android.launcher3"]);
-            docker(&["exec", CONTENEDOR, "input", "keyevent", "3"]);
-        }
-        let _ = std::fs::write(&marca, firma);
-        permisos_inicio();
-    });
+    };
+    let mut resultado = instalar();
+    // Una compilación de desarrollo puede venir firmada con una llave distinta.
+    if resultado.as_ref().is_err_and(|e| e.contains("INSTALL_FAILED_UPDATE_INCOMPATIBLE"))
+        && docker(&["exec", CONTENEDOR, "pm", "uninstall", INICIO])
+    {
+        resultado = instalar();
+    }
+    docker(&["exec", CONTENEDOR, "rm", "-f", destino]);
+    resultado
 }
 
 /// La pantalla de inicio escucha las notificaciones para el panel de ZYKRO, y las abre aunque esté
@@ -798,6 +867,19 @@ fn comando_run(info: &serde_json::Value, nueva: &config::Android) -> Result<Vec<
 
 #[cfg(test)]
 mod pruebas {
+    #[test]
+    fn solo_reemplaza_el_inicio_provisional() {
+        use super::inicio_provisional;
+
+        let selector = Some("android/com.android.internal.app.ResolverActivity");
+        assert!(inicio_provisional(Some("com.android.launcher3/.uioverrides.QuickstepLauncher"), ""));
+        assert!(inicio_provisional(Some("com.android.settings/.FallbackHome"), ""));
+        assert!(inicio_provisional(selector, "Intent { act=android.intent.action.MAIN cat=[android.intent.category.HOME] }"));
+        assert!(!inicio_provisional(selector, "Intent { act=android.intent.action.VIEW }"));
+        assert!(!inicio_provisional(Some("com.android.settings/.Settings"), ""));
+        assert!(!inicio_provisional(Some("com.dts.freefireth/.FFMainActivity"), ""));
+    }
+
     #[test]
     fn solo_apaga_bluetooth_cuando_la_imagen_lo_declara_inhabilitado() {
         let orden = format!(
