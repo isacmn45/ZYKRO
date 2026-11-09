@@ -2,6 +2,7 @@
 name = "zykro"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.95"
 description = "ZYKRO: emulador de Android sobre redroid, con servidor propio de pantalla, toques y sonido"
 license = "MIT"
 repository = "https://github.com/isacmn45/ZYKRO"

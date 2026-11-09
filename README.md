@@ -98,19 +98,24 @@ teclas y una puntería que se siente como la de BlueStacks. Todo lo que hay entr
 
 ## Requisitos
 
-- Linux con KDE Plasma 6 en Wayland. Probado en CachyOS; otros escritorios y distribuciones no se han
-  probado.
-- Un kernel con binder (`CONFIG_ANDROID_BINDERFS`), como el de CachyOS. En Ubuntu y Debian viene como
-  módulo en el paquete `linux-modules-extra-$(uname -r)`: instálalo y `preparar-android.sh` lo carga.
+- Linux **x86_64** con systemd y acceso a `sudo`. Probado con KDE Plasma 6 en Wayland, en CachyOS.
+  El instalador reconoce CachyOS/Arch, Ubuntu/Debian y Fedora; la ejecución en otras distribuciones
+  y escritorios todavía necesita pruebas en una laptop real.
+- Un kernel con binder (`CONFIG_ANDROID_BINDERFS`), como el de CachyOS. Se carga automáticamente
+  si está disponible; en Ubuntu el instalador intenta agregar el paquete de módulos del kernel
+  actual si hace falta. Si el kernel no lo admite, hace falta arrancar uno compatible.
 - La GPU:
   - **Intel:** probada (Iris Xe).
-  - **AMD:** sin probar; Android usa Mesa, así que debería funcionar.
+  - **AMD:** Android arrancó con Radeon y `radeonsi` en una laptop Ryzen 5 7520U con CachyOS y GNOME.
+    La fluidez en Free Fire sigue en evaluación.
   - **NVIDIA con su driver propietario:** ZYKRO todavía no puede mostrar la imagen.
-- Docker, con tu usuario en los grupos `docker` e `input` (`sudo usermod -aG docker,input $USER` y
-  volver a iniciar sesión).
-- Rust (`cargo`), `gcc`, `git` y `curl`.
-- PipeWire con `pipewire-pulse`, para el sonido.
-- Unos 5 GB libres. La primera instalación baja cerca de 1.1 GB.
+- Internet y unos 8 GB libres para las herramientas, la compilación y Android. Android descarga
+  cerca de 1.1 GB la primera vez; las herramientas que falten se descargan aparte.
+
+**El instalador prepara las dependencias:** compilador C, bibliotecas gráficas y de sonido, Rust
+1.95 o superior, Docker y las utilidades de ZYKRO. Configura los grupos `docker` e `input` y los
+permisos del ratón y los mandos. Conserva PulseAudio o PipeWire si el escritorio ya tiene sonido;
+si no, instala PipeWire. No necesitas SwagPlayer, Java ni el SDK de Android para instalar ZYKRO.
 
 ## Instalar
 
@@ -118,8 +123,17 @@ teclas y una puntería que se siente como la de BlueStacks. Todo lo que hay entr
 ./instalar.sh
 ```
 
-Compila ZYKRO, lo copia a `~/.local/bin`, crea su ícono en el menú y prepara Android con
-`preparar-android.sh`:
+Ejecuta el instalador **con tu usuario, sin anteponer `sudo`**. Pide la contraseña cuando necesita
+instalar paquetes o configurar el sistema. Puedes revisar lo que haría sin cambiar nada:
+
+```bash
+./instalar.sh --simular
+```
+
+La instalación completa detecta la distribución, instala solo los paquetes que faltan, comprueba
+Rust y prepara los permisos. Si necesita Rust más reciente, lo obtiene con `rustup` para tu usuario,
+sin cambiar tu toolchain predeterminado. Después compila ZYKRO, lo copia a `~/.local/bin`, crea su
+ícono en el menú y prepara Android con `preparar-android.sh`:
 
 1. Activa Docker si no está corriendo.
 2. Monta los dispositivos `binder` en cada arranque (servicio `zykro-binderfs`); si tu kernel lo trae
@@ -129,15 +143,50 @@ Compila ZYKRO, lo copia a `~/.local/bin`, crea su ícono en el menú y prepara A
    baja una vez Houdini 14 y MindTheGapps (unos 270 MB, verificados con su SHA-256) y les suma el
    servidor de ZYKRO.
 
-El contenedor lo crea ZYKRO la primera vez que lo abres. Pide tu contraseña solo para los pasos 1 a 3,
-y cada paso se salta si ya está hecho, así que puedes volver a correrlo después de actualizar el
-repositorio. Con `--sin-android` solo instala ZYKRO.
+El contenedor lo crea ZYKRO la primera vez que lo abres. Si se agregaron permisos, **cierra la sesión
+de Linux y vuelve a entrar antes de abrir ZYKRO**: el instalador puede terminar de preparar Docker
+en esa primera ejecución, aunque los grupos nuevos todavía no estén activos en tu sesión.
+
+Puedes volver a correrlo después de actualizar el repositorio. Con `--sin-android` omite la
+preparación de Android; con `--sin-dependencias` usa las herramientas y permisos que ya hayas
+preparado. El instalador no cambia el escritorio ni reemplaza el kernel.
 
 Para copiar también nuestro mapeo de Free Fire (reemplaza el que tengas):
 
 ```bash
 ./instalar.sh --keymap
 ```
+
+### Continuar las pruebas en la laptop con CachyOS y GNOME
+
+Con ZYKRO cerrado, abre en Codex la copia del repositorio en la laptop Ryzen 5 7520U con 8 GB de
+RAM. Desde esa carpeta, trae los cambios de `main` e instala el cliente y la imagen actualizados.
+
+```bash
+git pull --ff-only origin main && ./instalar.sh
+```
+
+El instalador selecciona Zenity en GNOME. Este comando conserva tus apps, datos y mapeos.
+
+1. En el siguiente arranque, observa si el fondo verde fugaz vuelve a aparecer entre la carga y el
+   inicio temático. Esta versión espera a que el launcher de ZYKRO dibuje su ventana.
+2. Abre **Instalar APK** y comprueba que aparece el selector. Luego prueba asignar la tecla física
+   sobre Tab (`|` en español latinoamericano) y eliminar un control con la × del editor.
+3. Con la puntería activada, mantén la tecla de **Suspender** (Ctrl en el mapa de ejemplo). Comprueba
+   que el cursor queda libre mientras la mantienes y vuelve a apuntar al soltarla.
+
+En esta laptop, Free Fire fluctuaba entre 40 y 60 FPS en entrenamiento a 1280 × 720 y gráficos
+bajos. SurfaceFlinger usa la Radeon con `radeonsi`. Queda por confirmar la ruta del cliente y dónde
+cae la cadencia. En la próxima apertura, activa el registro desde una terminal.
+
+```bash
+ZYKRO_RITMO=1 "$HOME/.local/bin/zykro"
+```
+
+Guarda la línea `[video]` y unos segundos de `[ritmo] recepción` durante el tirón, junto con los
+FPS de la barra de ZYKRO. Si la recepción sigue cerca de 60 y la barra baja a 40, revisa la cola y la
+presentación en GNOME. Si también baja la recepción y hay cero copias por CPU, compara con la
+cadencia del juego y de la captura en Android. ZYKRO configura Android a 60 FPS por defecto.
 
 ## Qué hay en el repositorio
 
@@ -148,6 +197,8 @@ Para copiar también nuestro mapeo de Free Fire (reemplaza el que tengas):
 | `servidor/` | El servidor de ZYKRO dentro de Android (Java, corre con `app_process`): la pantalla como DMA-BUF, sin comprimir ni copiar; los toques y teclas; el sonido en un anillo de memoria compartida; la app al frente y si un juego abrió su cuadro de texto. `servidor/construir.sh` lo compila con el SDK de Android; el `.jar` viene incluido. |
 | `imagen/` | Arma la imagen de Android de ZYKRO (`imagen/construir.sh`): redroid 13 con Houdini 14 parcheado, Google Play, el servidor, las superposiciones y propiedades de un teléfono normal. Si la imagen cambia, ZYKRO recrea el contenedor con ella al abrirse (mismos datos). |
 | `preparar-android.sh` | Deja listo Android: Docker, binder, uinput y la imagen. |
+| `instalacion/sistema.sh` | Detecta la distribución, instala dependencias y configura Rust y los permisos. |
+| `pruebas/instalador.py` | Pruebas del instalador con gestores de paquetes y órdenes privilegiadas simulados; se ejecutan con `python3 pruebas/instalador.py`. |
 | `bin/teclado-android`, `src/teclado-fisico.c` | Crean un teclado "físico" vacío dentro de Android para que no muestre su teclado en pantalla; ZYKRO lo usa al arrancar. |
 | `superposiciones/` | Superposiciones de recursos que adaptan la interfaz de Android a una ventana de laptop: `configuracion/` (la app de Configuración), `sistema/` (centro de control y notificaciones) y `marco/` (sin barras de estado ni de navegación). `superposiciones/construir.sh` las compila; los APK vienen incluidos. |
 | `config/keymap/` | Nuestro mapeo de teclas para Free Fire. |

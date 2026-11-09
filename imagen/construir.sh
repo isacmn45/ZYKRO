@@ -4,6 +4,7 @@
 # lo anterior.
 set -e
 cd "$(dirname "$0")"
+. ../instalacion/sistema.sh
 IMAGEN=zykro-android:13
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/zykro/descargas"
 mkdir -p "$CACHE" descargas
@@ -27,7 +28,7 @@ cp ../servidor/zykro-servidor.jar ../superposiciones/configuracion.apk ../superp
     ../superposiciones/marco.apk .
 # Sin buildx, Docker avisa que su constructor viejo está obsoleto (funciona igual): solo se
 # muestran los errores.
-if ! salida=$(docker build -q -t "$IMAGEN" . 2>&1); then
+if ! salida=$(zykro_docker build -q -t "$IMAGEN" . 2>&1); then
     echo "$salida" | grep -v -E "DEPRECATED|legacy builder|buildx|^ *$"
     exit 1
 fi
