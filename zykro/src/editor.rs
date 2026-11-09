@@ -460,6 +460,20 @@ pub fn dibujar(p: &Painter, rect: Rect, mapa: &Mapa, opacidad: f32, elegida: Opt
     zonas
 }
 
+/// Una × por control, aunque tenga varias teclas o puntos de arrastre.
+fn botones_eliminar(zonas: &[Zona], rect: Rect) -> Vec<(Asa, Pos2)> {
+    let mut botones: Vec<(Asa, Pos2)> = Vec::new();
+    for z in zonas {
+        let asa = z.asa.nodo().map(Asa::Nodo).unwrap_or(z.asa);
+        if matches!(asa, Asa::Disparo | Asa::Ojo) || botones.iter().any(|(a, _)| *a == asa) {
+            continue;
+        }
+        let centro = rect.shrink(9.0).clamp(z.centro + Vec2::new(z.radio + 4.0, -z.radio - 4.0));
+        botones.push((asa, centro));
+    }
+    botones
+}
+
 /// Texturas de los puntos de mira personalizados, por archivo (`None` si no se pudo leer).
 static IMAGENES_MIRA: Mutex<Vec<(String, Option<TextureHandle>)>> = Mutex::new(Vec::new());
 
@@ -893,10 +907,26 @@ impl Editor {
         // Velo ligero para que se note que se está editando.
         painter.rect_filled(rect, 0.0, Color32::from_black_alpha(60));
         let zonas = dibujar(&painter, rect, &self.mapa, 1.0, self.elegida, true);
+        let borrar = botones_eliminar(&zonas, rect);
+        for (_, centro) in &borrar {
+            let encima = ui.input(|i| i.pointer.hover_pos().is_some_and(|p| p.distance(*centro) <= 9.0));
+            painter.circle(*centro, 9.0, if encima { crate::CERRAR_HOVER } else { FONDO_CONTROL }, Stroke::new(1.0, Color32::WHITE));
+            painter.text(*centro, Align2::CENTER_CENTER, "×", FontId::proportional(16.0), Color32::WHITE);
+        }
 
         let resp = ui.interact(rect, Id::new("editor-pantalla"), Sense::click_and_drag());
         let tocada = |pos: Pos2| zonas.iter().rev().find(|z| z.centro.distance(pos) <= z.radio + 3.0).map(|z| z.asa);
         if let Some(pos) = resp.interact_pointer_pos() {
+            if let Some((asa, _)) = borrar.iter().rev().find(|(_, centro)| centro.distance(pos) <= 10.0) {
+                if resp.clicked() {
+                    self.elegida = Some(*asa);
+                    self.eliminar();
+                    self.arrastrando = None;
+                    self.ajustes_apuntar = false;
+                }
+                // Pulsar la × no inicia la captura de una tecla ni arrastra el control.
+                return;
+            }
             if resp.drag_started() {
                 self.arrastrando = tocada(pos);
                 if let Some(asa) = self.arrastrando {
@@ -1872,8 +1902,28 @@ mod pruebas {
         dibujados
     }
 
-    /// Un clic en el control de puntería abre «Ajustes de apuntar, desplazar y disparar» con los
-    /// campos de BlueStacks (y ya no espera una tecla).
+    /// La × funciona con un clic real sobre la pantalla del editor.
+    #[test]
+    fn la_x_elimina_el_control_sin_capturar_tecla() {
+        let ctx = egui::Context::default();
+        let mut editor = Editor::new();
+        let mut mapa = Mapa::default();
+        mapa.nodos.push(Nodo::Clic(serde_json::from_value(serde_json::json!({"key":"F", "pos":{"x":0.5,"y":0.5}})).unwrap(), false));
+        editor.abrir("prueba", Some(mapa));
+        cuadro(&ctx, &mut editor, vec![], 0.0);
+        let rect = Rect::from_min_size(Pos2::ZERO, PANTALLA);
+        let zonas = dibujar(&ctx.layer_painter(LayerId::background()), rect, &editor.mapa, 1.0, None, true);
+        let pos = botones_eliminar(&zonas, rect)[0].1;
+        let clic = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        cuadro(&ctx, &mut editor, vec![egui::Event::PointerMoved(pos)], 0.01);
+        cuadro(&ctx, &mut editor, vec![clic(true)], 0.05);
+        cuadro(&ctx, &mut editor, vec![clic(false)], 0.1);
+        assert!(editor.mapa.nodos.is_empty());
+        assert_eq!(editor.esperando, None);
+        assert_eq!(editor.elegida, None);
+    }
+
+    /// Un clic en la puntería abre sus ajustes y no captura una tecla.
     #[test]
     fn la_punteria_abre_sus_ajustes() {
         let ctx = egui::Context::default();
