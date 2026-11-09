@@ -3053,6 +3053,39 @@ mod pruebas {
         r
     }
 
+    #[test]
+    fn suspende_y_reanuda_aunque_ctrl_baje_y_suba_en_el_mismo_cuadro() {
+        let mut raton = puntero((0.5, 0.5), 0);
+        raton.tecla_pausa = Some("Key_Control".into());
+        raton.disparo = Some(Punto::nuevo(0.8, 0.8));
+        raton.disparo_con_clic = true;
+        let mapa = Mapa { raton: Some(raton), ..Mapa::default() };
+        let toques = toques(mapa, |motor, ctl| {
+            let movimiento = Vec2::new(10.0, 0.0);
+            motor.apuntando = true;
+            motor.mover(movimiento, ctl, W, H);
+            assert!(motor.boton(PointerButton::Primary, true, ctl, W, H));
+
+            let mut previos = egui::Modifiers::NONE;
+            let mut cambiar = |motor: &mut Motor, mods| {
+                for (nombre, presionada) in crate::cambios_modificadores(&mut previos, mods) {
+                    assert!(motor.tecla(nombre, presionada, false, ctl, W, H));
+                }
+            };
+            cambiar(motor, egui::Modifiers::CTRL);
+            assert!(!motor.cursor_bloqueado());
+            motor.mover(movimiento, ctl, W, H);
+            assert!(!motor.boton(PointerButton::Primary, true, ctl, W, H));
+
+            cambiar(motor, egui::Modifiers::NONE);
+            cambiar(motor, egui::Modifiers::NONE);
+            assert!(motor.cursor_bloqueado());
+            motor.mover(movimiento, ctl, W, H);
+        });
+        let acciones: Vec<_> = toques.into_iter().map(|(accion, _, _)| accion).collect();
+        assert_eq!(acciones, [BAJAR, MOVER, BAJAR, SOLTAR, SOLTAR, BAJAR, MOVER]);
+    }
+
     /// Sin «Ajustes», al salirse de la pantalla el dedo se levanta, baja otra vez en el ancla y sigue
     /// con el movimiento de ese momento; con `SIN_RECENTRAR`, sigue afuera.
     #[test]

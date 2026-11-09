@@ -97,6 +97,9 @@ pub fn iniciar(motor: Arc<Mutex<Motor>>, activo: Arc<AtomicBool>, listo: Arc<Ato
                                 let clics = std::mem::take(&mut raton.botones);
                                 if activo.load(Ordering::Relaxed) && (delta != Vec2::ZERO || !clics.is_empty()) {
                                     let mut m = motor.lock().unwrap();
+                                    if !activo.load(Ordering::Relaxed) || !m.cursor_bloqueado() {
+                                        continue;
+                                    }
                                     if delta != Vec2::ZERO {
                                         m.mover_directo(delta);
                                     }

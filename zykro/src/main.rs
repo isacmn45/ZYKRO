@@ -875,6 +875,9 @@ impl Zykro {
             if let Some(c) = &control {
                 motor.soltar_todo(c, w, h);
             }
+        } else if activo && !self.mapeo_activo {
+            // El motor soltó sus teclas al perder el foco. Reconcilia las que sigan mantenidas.
+            self.mods_previos = egui::Modifiers::NONE;
         }
         self.mapeo_activo = activo;
 
@@ -922,6 +925,11 @@ impl Zykro {
         }
     }
 
+    fn sincronizar_cursor(&mut self, ctx: &egui::Context) {
+        let bloquear = self.mapeo_activo && self.motor().cursor_bloqueado();
+        self.bloquear_cursor(ctx, bloquear);
+    }
+
     fn panel_editor(&mut self, raiz: &mut egui::Ui) {
         let salida = egui::Panel::right("editor")
             .exact_size(272.0)
@@ -946,16 +954,6 @@ impl Zykro {
     /// Con el editor abierto, las teclas se asignan a los controles en vez de ir a Android.
     fn teclas_editor(&mut self, ctx: &egui::Context) {
         let (eventos, mods) = ctx.input(|i| (i.events.clone(), i.modifiers));
-        for (antes, ahora, nombre) in [
-            (self.mods_previos.shift, mods.shift, "Key_Shift"),
-            (self.mods_previos.ctrl, mods.ctrl, "Key_Control"),
-            (self.mods_previos.alt, mods.alt, "Key_Alt"),
-        ] {
-            if ahora && !antes && self.editor.esperando_tecla() {
-                self.editor.tecla(nombre);
-            }
-        }
-        self.mods_previos = mods;
         // Un botón del mando, para los campos de la pestaña «Gamepad» (los de antes se descartan). El
         // mando no despierta a la ventana: mientras espera uno, se revisa cada 50 ms.
         if let Some(boton) = gamepad::tomar_boton().filter(|_| self.editor.esperando_mando()) {
@@ -966,8 +964,15 @@ impl Zykro {
         }
         // Escribiendo en un campo (el color de la mira, un script), Supr y las letras son del campo.
         let escribiendo = ctx.egui_wants_keyboard_input() && !self.editor.esperando_tecla();
-        for evento in eventos {
+        for evento in eventos.into_iter().chain([Event::ModifiersChanged(mods)]) {
             match evento {
+                Event::ModifiersChanged(mods) => {
+                    for (nombre, presionada) in cambios_modificadores(&mut self.mods_previos, mods) {
+                        if presionada && self.editor.esperando_tecla() {
+                            self.editor.tecla(nombre);
+                        }
+                    }
+                }
                 Event::Key { key, physical_key, pressed: true, repeat: false, .. } if !escribiendo => {
                     self.editor.tecla_egui(key, physical_key);
                 }
@@ -1256,8 +1261,7 @@ impl Zykro {
 
             if self.editor.abierto {
                 self.teclas_editor(ctx);
-            } else if !en_borde
-                && !self.ajustes.abierto
+            } else if !self.ajustes.abierto
                 && !self.ajustes_android.abierto
                 && !self.fondos.abierto()
                 && !self.panel.abierto()
@@ -1265,7 +1269,7 @@ impl Zykro {
                 && !self.confirmar_cierre
                 && !self.recientes.abierto()
             {
-                self.entrada(ctx, rect, ancho, alto);
+                self.entrada(ctx, rect, ancho, alto, en_borde);
             }
             if let Some(recientes::Accion::Inicio) = self.recientes.mostrar(ctx, area, rect, self.pantalla.id()) {
                 self.pulsar(3);
@@ -1293,7 +1297,7 @@ impl Zykro {
     }
 
     /// Mouse como dedo, rueda como scroll y teclado como teclado de Android.
-    fn entrada(&mut self, ctx: &egui::Context, rect: Rect, ancho: f32, alto: f32) {
+    fn entrada(&mut self, ctx: &egui::Context, rect: Rect, ancho: f32, alto: f32, en_borde: bool) {
         let Some(control) = self.control() else { return };
         let (w, h) = (ancho as u16, alto as u16);
         let a_android = |p: Pos2| {
@@ -1303,22 +1307,48 @@ impl Zykro {
         };
         let (eventos, puntero, mods) = ctx.input(|i| (i.events.clone(), i.pointer.hover_pos(), i.modifiers));
         let pantalla_completa = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-        let (activo, bloqueado) = (self.mapeo_activo, self.cursor_bloqueado);
-        // Con la puntería activa, el hilo de raton.rs ya manda el mouse directo a Android.
-        let directo = self.raton_directo.load(Ordering::Relaxed);
-        // egui no avisa de Shift/Ctrl/Alt solos: se detectan comparando con el cuadro anterior.
-        for (antes, ahora, nombre) in [
-            (self.mods_previos.shift, mods.shift, "Key_Shift"),
-            (self.mods_previos.ctrl, mods.ctrl, "Key_Control"),
-            (self.mods_previos.alt, mods.alt, "Key_Alt"),
-        ] {
-            if activo && antes != ahora {
-                self.motor().tecla(nombre, ahora, false, &control, ancho, alto);
-            }
-        }
-        self.mods_previos = mods;
-        for evento in eventos {
+        let activo = self.mapeo_activo;
+        // Dos cambios de Ctrl pueden llegar en el mismo cuadro. El estado final sirve para
+        // reconciliar el foco, después de procesar los cambios y los clics en su orden original.
+        for evento in eventos.into_iter().chain([Event::ModifiersChanged(mods)]) {
+            let bloqueado = self.cursor_bloqueado;
+            let directo = self.raton_directo.load(Ordering::Relaxed);
             match evento {
+                Event::ModifiersChanged(mods) => {
+                    let mut cambios = cambios_modificadores(&mut self.mods_previos, mods).peekable();
+                    if activo && cambios.peek().is_some() {
+                        let mut motor = self.motor();
+                        let mut cambio_cursor = false;
+                        for (nombre, presionada) in cambios {
+                            cambio_cursor |= motor.tecla(nombre, presionada, false, &control, ancho, alto);
+                        }
+                        drop(motor);
+                        if cambio_cursor {
+                            self.sincronizar_cursor(ctx);
+                        }
+                    }
+                }
+                // El borde reserva el puntero para redimensionar. El teclado y las sueltas
+                // siguen llegando para que una suspensión o un toque no se queden activos.
+                Event::MouseMoved(_) | Event::PointerMoved(_) | Event::MouseWheel { .. }
+                | Event::PointerButton { pressed: true, .. } if en_borde => {}
+                Event::PointerButton { button: PointerButton::Primary, pressed: false, .. }
+                    if self.desde_borde.is_some() =>
+                {
+                    if let Some(inicio) = self.desde_borde.take() {
+                        let (x, y) = a_android(inicio);
+                        control.toque(BAJAR, 0, x, y, w, h);
+                        control.toque(SOLTAR, 0, x, y, w, h);
+                    }
+                }
+                // Un toque iniciado con la mira suspendida también se suelta si se retomó la mira.
+                Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, .. }
+                    if self.tocando.is_some() =>
+                {
+                    let (x, y) = a_android(pos);
+                    control.toque(SOLTAR, 0, x, y, w, h);
+                    self.tocando = None;
+                }
                 Event::MouseMoved(delta) if activo && bloqueado => {
                     if !directo {
                         self.motor().mover(delta, &control, ancho, alto);
@@ -1326,7 +1356,10 @@ impl Zykro {
                 }
                 Event::PointerButton { pos, button, pressed, .. } if activo && (bloqueado || button != PointerButton::Primary) => {
                     if !(bloqueado && directo) && (bloqueado || !pressed || rect.contains(pos)) {
-                        self.motor().boton(button, pressed, &control, ancho, alto);
+                        let usada = self.motor().boton(button, pressed, &control, ancho, alto);
+                        if usada {
+                            self.sincronizar_cursor(ctx);
+                        }
                     }
                 }
                 // Un toque sobre la notificación emergente es para ella (panel.rs), no para Android.
@@ -1345,13 +1378,6 @@ impl Zykro {
                     self.desde_borde = None;
                     self.panel.abrir_arrastrando(ctx);
                 }
-                Event::PointerButton { button: PointerButton::Primary, pressed: false, .. } if self.desde_borde.is_some() => {
-                    if let Some(inicio) = self.desde_borde.take() {
-                        let (x, y) = a_android(inicio);
-                        control.toque(BAJAR, 0, x, y, w, h);
-                        control.toque(SOLTAR, 0, x, y, w, h);
-                    }
-                }
                 // Una habilidad MOBA manual apuntando: el clic izquierdo la lanza (no le llega a Android).
                 Event::PointerButton { button: PointerButton::Primary, pressed, .. } if activo && !bloqueado && self.motor().captura_clic() => {
                     self.motor().boton(PointerButton::Primary, pressed, &control, ancho, alto);
@@ -1365,11 +1391,6 @@ impl Zykro {
                     let (x, y) = a_android(pos);
                     control.toque(MOVER, 0, x, y, w, h);
                     self.tocando = Some(pos);
-                }
-                Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, .. } if self.tocando.is_some() => {
-                    let (x, y) = a_android(pos);
-                    control.toque(SOLTAR, 0, x, y, w, h);
-                    self.tocando = None;
                 }
                 Event::PointerGone => {
                     if let Some(pos) = self.tocando.take() {
@@ -1414,6 +1435,7 @@ impl Zykro {
                 Event::Key { key: egui::Key::Escape, pressed: true, .. } if self.config().esc_sale && (bloqueado || pantalla_completa) => {
                     if bloqueado {
                         self.motor().soltar_punteria(&control, ancho, alto);
+                        self.sincronizar_cursor(ctx);
                     }
                     if pantalla_completa {
                         ctx.send_viewport_cmd(ViewportCommand::Fullscreen(false));
@@ -1422,7 +1444,9 @@ impl Zykro {
                 Event::Key { key, physical_key, pressed, repeat, modifiers } => {
                     if activo {
                         if let Some(nombre) = mapeo::nombre_tecla_evento(key, physical_key) {
-                            if self.motor().tecla(&nombre, pressed, repeat, &control, ancho, alto) {
+                            let usada = self.motor().tecla(&nombre, pressed, repeat, &control, ancho, alto);
+                            if usada {
+                                self.sincronizar_cursor(ctx);
                                 continue;
                             }
                         }
@@ -1444,6 +1468,17 @@ impl Zykro {
             }
         }
     }
+}
+
+fn cambios_modificadores(previos: &mut egui::Modifiers, nuevos: egui::Modifiers) -> impl Iterator<Item = (&'static str, bool)> {
+    let previos = std::mem::replace(previos, nuevos);
+    [
+        ("Key_Shift", previos.shift, nuevos.shift),
+        ("Key_Control", previos.ctrl, nuevos.ctrl),
+        ("Key_Alt", previos.alt, nuevos.alt),
+    ]
+    .into_iter()
+    .filter_map(|(nombre, antes, ahora)| (antes != ahora).then_some((nombre, ahora)))
 }
 
 impl eframe::App for Zykro {
@@ -1485,8 +1520,7 @@ impl eframe::App for Zykro {
         }
         self.pantalla(ui, en_borde);
         // Si una tecla acaba de prender o apagar la puntería, el cursor cambia ya, no en el próximo cuadro.
-        let bloquear = self.mapeo_activo && self.motor().cursor_bloqueado();
-        self.bloquear_cursor(ctx, bloquear);
+        self.sincronizar_cursor(ctx);
         let salida = {
             let mut motor = self.motor.lock().unwrap();
             self.menu.mostrar(ctx, motor.mapa.as_mut())
